@@ -32,7 +32,6 @@ const generateRoomCode = () => {
   return code;
 };
 
-// Добавление лога с поддержкой цветных имён игроков
 const addLog = (room, segments) => {
   room.logs.push({
     id: Date.now() + Math.random(),
@@ -52,11 +51,18 @@ const broadcastRoom = (roomCode) => {
   }
 };
 
+// Проверка: есть ли хотя бы 1 дом в стране (цветовой группе) данного города
+const hasHousesInCountry = (room, tile) => {
+  if (!tile || tile.type !== 'city' || !tile.group) return false;
+  return BOARD_CONFIG.tiles.some(
+    (t) => t.type === 'city' && t.group === tile.group && (room.properties[t.id]?.houses || 0) > 0
+  );
+};
+
 const eliminatePlayer = (room, player) => {
   player.bankrupt = true;
   player.money = 0;
   player.owedToId = null;
-  // Освобождаем всю недвижимость выбывшего игрока
   Object.keys(room.properties).forEach((tid) => {
     if (room.properties[tid].ownerId === player.id) {
       delete room.properties[tid];
@@ -68,6 +74,7 @@ const checkGameWinner = (room) => {
   const active = room.players.filter((p) => !p.bankrupt);
   if (active.length <= 1 && room.status === 'playing') {
     room.status = 'finished';
+    room.winnerId = active[0]?.id || null;
     if (active[0]) {
       addLog(room, [
         { text: 'O‘yin tugadi! G‘olib: ' },
@@ -121,6 +128,7 @@ io.on('connection', (socket) => {
       code,
       password: (password || '').trim(),
       hostId: playerId,
+      winnerId: null,
       status: 'waiting',
       players: [newPlayer],
       turnIndex: 0,
@@ -202,7 +210,7 @@ io.on('connection', (socket) => {
     broadcastRoom(code);
   });
 
-  // 4. Выход игрока из комнаты по кнопке
+  // 4. Выход игрока из комнаты
   socket.on('leave_room', ({ code, playerId }) => {
     const room = rooms.get(code);
     if (!room) return;
@@ -266,11 +274,14 @@ io.on('connection', (socket) => {
     const room = rooms.get(code);
     if (!room || room.hostId !== hostId) return;
     room.status = 'finished';
+    // Победителем при досрочном завершении считается игрок с наибольшим капиталом
+    const active = room.players.filter((p) => !p.bankrupt).sort((a, b) => b.money - a.money);
+    room.winnerId = active[0]?.id || null;
     addLog(room, 'Xona egasi o‘yinni yakunladi.');
     broadcastRoom(code);
   });
 
-  // 7. Добровольное банкротство (игрок выбывает и остаётся наблюдателем)
+  // 7. Добровольное банкротство
   socket.on('declare_bankrupt', ({ code, playerId }) => {
     const room = rooms.get(code);
     if (!room || room.status !== 'playing') return;
@@ -308,7 +319,6 @@ io.on('connection', (socket) => {
       { text: ` tosh tashladi: ${d1} + ${d2} = ${steps}${isDouble ? ' (DUBL!)' : ''}.` },
     ]);
 
-    // Проверка на 3-й дубль подряд -> Тюрьма
     if (!p.inJail && isDouble) {
       room.doublesCount = (room.doublesCount || 0) + 1;
       if (room.doublesCount >= 3) {
@@ -328,7 +338,6 @@ io.on('connection', (socket) => {
       room.doublesCount = 0;
     }
 
-    // Логика тюрьмы (выход после 3 неудачных бросков оставаясь в поле тюрьмы)
     if (p.inJail) {
       if (isDouble) {
         p.inJail = false;
@@ -357,7 +366,6 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Движение по часовой стрелке
     const oldPos = p.position;
     const totalTiles = BOARD_CONFIG.tiles.length;
     const newPos = (oldPos + steps) % totalTiles;
@@ -384,6 +392,14 @@ io.on('connection', (socket) => {
       p.money -= landedTile.amount;
       p.owedToId = p.money < 0 ? 'bank' : null;
       addLog(room, [playerSeg(p), { text: ` ${landedTile.amount}$ soliq to‘ladi.` }]);
+    } else if (landedTile.type === 'tax_percent') {
+      const taxAmount = p.money > 0 ? Math.round((p.money * landedTile.percent) / 100) : 0;
+      p.money -= taxAmount;
+      p.owedToId = p.money < 0 ? 'bank' : null;
+      addLog(room, [
+        playerSeg(p),
+        { text: ` ${landedTile.percent}% soliq (${taxAmount}$) to‘ladi.` },
+      ]);
     } else if (landedTile.type === 'gotojail') {
       const jailIdx = BOARD_CONFIG.tiles.findIndex((t) => t.type === 'jail');
       p.position = jailIdx !== -1 ? jailIdx : 6;
@@ -406,12 +422,15 @@ io.on('connection', (socket) => {
         if (p.money < 0) p.owedToId = 'bank';
       }
       addLog(room, [{ text: `Omad kartasi: ${ev.text}` }]);
-    } else if (landedTile.type === 'city' || landedTile.type === 'station') {
+    } else if (
+      landedTile.type === 'city' ||
+      landedTile.type === 'station' ||
+      landedTile.type === 'company'
+    ) {
       const prop = room.properties[landedTile.id];
       if (prop && prop.ownerId !== p.id) {
         const owner = room.players.find((pl) => pl.id === prop.ownerId);
         if (owner && !owner.bankrupt) {
-          // В тюрьме игрок не получает прибыли
           if (owner.inJail) {
             addLog(room, [
               playerSeg(owner),
@@ -419,11 +438,12 @@ io.on('connection', (socket) => {
             ]);
           } else {
             let rentToPay = 0;
+            let detailText = '';
+
             if (landedTile.type === 'city') {
               const houses = prop.houses || 0;
               rentToPay = landedTile.rents[houses] ?? landedTile.rents[0];
-            } else {
-              // Считаем сколько станций у владельца
+            } else if (landedTile.type === 'station') {
               const ownedStationsCount = BOARD_CONFIG.tiles.filter(
                 (t) => t.type === 'station' && room.properties[t.id]?.ownerId === owner.id
               ).length;
@@ -432,6 +452,18 @@ io.on('connection', (socket) => {
                 Math.min(ownedStationsCount - 1, BOARD_CONFIG.stationRents.length - 1)
               );
               rentToPay = BOARD_CONFIG.stationRents[stationIdx];
+            } else if (landedTile.type === 'company') {
+              const multipliers = BOARD_CONFIG.companyMultipliers || [4, 10];
+              const ownedCompaniesCount = BOARD_CONFIG.tiles.filter(
+                (t) => t.type === 'company' && room.properties[t.id]?.ownerId === owner.id
+              ).length;
+              const compIdx = Math.max(
+                0,
+                Math.min(ownedCompaniesCount - 1, multipliers.length - 1)
+              );
+              const mult = multipliers[compIdx];
+              rentToPay = steps * mult;
+              detailText = ` (${steps} qadam × ${mult}$)`;
             }
 
             p.money -= rentToPay;
@@ -443,7 +475,7 @@ io.on('connection', (socket) => {
               playerSeg(p),
               { text: ' ijara haqi sifatida ' },
               playerSeg(owner),
-              { text: `ga ${rentToPay}$ to‘ladi.` },
+              { text: `ga ${rentToPay}$${detailText} to‘ladi.` },
             ]);
           }
         }
@@ -459,12 +491,11 @@ io.on('connection', (socket) => {
       ]);
     }
 
-    // Если выпал дубль (и не попал в тюрьму / не в минусе), можно и купить клетку, и бросить снова
     room.hasRolled = !isDouble || p.inJail || p.money < 0;
     broadcastRoom(code);
   });
 
-  // 9. Покупка клетки (доступна даже если выпал дубль до повторного броска)
+  // 9. Покупка клетки
   socket.on('buy_tile', ({ code, playerId }) => {
     const room = rooms.get(code);
     if (!room) return;
@@ -472,8 +503,14 @@ io.on('connection', (socket) => {
     if (!p || p.id !== playerId || p.money < 0) return;
 
     const tile = BOARD_CONFIG.tiles[p.position];
-    if ((tile.type !== 'city' && tile.type !== 'station') || room.properties[tile.id]) return;
+    if (
+      (tile.type !== 'city' && tile.type !== 'station' && tile.type !== 'company') ||
+      room.properties[tile.id]
+    )
+      return;
     if (p.money < tile.price) return;
+
+    
 
     p.money -= tile.price;
     room.properties[tile.id] = { ownerId: p.id, houses: 0 };
@@ -484,7 +521,7 @@ io.on('connection', (socket) => {
     broadcastRoom(code);
   });
 
-  // 10. Строительство дома (только если собраны все города этой страны/группы)
+  // 10. Строительство дома
   socket.on('build_house', ({ code, playerId, tileId }) => {
     const room = rooms.get(code);
     if (!room) return;
@@ -494,7 +531,6 @@ io.on('connection', (socket) => {
 
     if (!tile || tile.type !== 'city' || !prop || prop.ownerId !== playerId || !p) return;
 
-    // Проверка монополии на всю страну/группу
     const countryCities = BOARD_CONFIG.tiles.filter(
       (t) => t.type === 'city' && t.group === tile.group
     );
@@ -505,23 +541,64 @@ io.on('connection', (socket) => {
     const currentHouses = prop.houses || 0;
     if (currentHouses >= maxHouses || p.money < tile.houseCost) return;
 
-p.money -= tile.houseCost;
-prop.houses = currentHouses + 1;
-addLog(room, [
-  playerSeg(p),
-  { text: ` "${tile.name}" shahrida uy qurdi (${prop.houses}/${maxHouses}).` },
-]);
-
     p.money -= tile.houseCost;
     prop.houses = currentHouses + 1;
     addLog(room, [
       playerSeg(p),
-      { text: ` "${tile.name}" shahrida uy qurdi (${prop.houses}/4).` },
+      { text: ` "${tile.name}" shahrida uy qurdi (${prop.houses}/${maxHouses}).` },
     ]);
     broadcastRoom(code);
   });
 
-  // 11. Выход из тюрьмы за штраф или карту
+  // 11. Удаление (продажа) дома за 50% от цены постройки
+  socket.on('sell_house', ({ code, playerId, tileId }) => {
+    const room = rooms.get(code);
+    if (!room) return;
+    const tile = BOARD_CONFIG.tiles.find((t) => t.id === tileId);
+    const prop = room.properties[tileId];
+    const p = room.players.find((pl) => pl.id === playerId);
+
+    if (!tile || tile.type !== 'city' || !prop || prop.ownerId !== playerId || !p) return;
+    if ((prop.houses || 0) <= 0) return;
+
+    const refund = Math.floor(tile.houseCost / 2);
+    prop.houses -= 1;
+    p.money += refund;
+    if (p.money >= 0) p.owedToId = null;
+
+    const maxHouses = (tile.rents?.length || 1) - 1;
+    addLog(room, [
+      playerSeg(p),
+      { text: ` "${tile.name}" shahridagi uyni ${refund}$ ga sotdi (${prop.houses}/${maxHouses}).` },
+    ]);
+    broadcastRoom(code);
+  });
+
+  // 12. Удаление (продажа банку) города/станции за 50% стоимости
+  // Нельзя удалить город, если в этой стране построен хоть один дом
+  socket.on('sell_tile', ({ code, playerId, tileId }) => {
+    const room = rooms.get(code);
+    if (!room) return;
+    const tile = BOARD_CONFIG.tiles.find((t) => t.id === tileId);
+    const prop = room.properties[tileId];
+    const p = room.players.find((pl) => pl.id === playerId);
+
+    if (!tile || !prop || prop.ownerId !== playerId || !p) return;
+    if (hasHousesInCountry(room, tile)) return;
+
+    const refund = Math.floor(tile.price / 2);
+    delete room.properties[tileId];
+    p.money += refund;
+    if (p.money >= 0) p.owedToId = null;
+
+    addLog(room, [
+      playerSeg(p),
+      { text: ` "${tile.name}" mulkini bankka ${refund}$ ga topshirdi.` },
+    ]);
+    broadcastRoom(code);
+  });
+
+  // 13. Выход из тюрьмы за штраф или карту
   socket.on('leave_jail', ({ code, playerId, useCard }) => {
     const room = rooms.get(code);
     if (!room) return;
@@ -546,7 +623,7 @@ addLog(room, [
     }
   });
 
-  // 12. Передача хода (нельзя передать, если баланс в минусе)
+  // 14. Передача хода
   socket.on('end_turn', ({ code, playerId }) => {
     const room = rooms.get(code);
     if (!room) return;
@@ -556,10 +633,18 @@ addLog(room, [
     broadcastRoom(code);
   });
 
-  // 13. Торговля (включая обнуление долга кредитором)
+  // 15. Торговля (нельзя передать город, если в его стране есть хоть 1 дом)
   socket.on('send_trade', ({ code, trade }) => {
     const room = rooms.get(code);
     if (!room) return;
+
+    const allTradedTileIds = [...(trade.offerTiles || []), ...(trade.requestTiles || [])];
+    const blocked = allTradedTileIds.some((tid) => {
+      const t = BOARD_CONFIG.tiles.find((x) => x.id === Number(tid));
+      return hasHousesInCountry(room, t);
+    });
+    if (blocked) return;
+
     const sender = room.players.find((p) => p.id === trade.fromId);
     room.pendingTrade = trade;
     if (sender) {
@@ -582,10 +667,20 @@ addLog(room, [
       return broadcastRoom(code);
     }
 
+    // Повторная проверка перед исполнением сделки: нет ли домов в странах передаваемых городов
+    const allTradedTileIds = [...(trade.offerTiles || []), ...(trade.requestTiles || [])];
+    const blocked = allTradedTileIds.some((tid) => {
+      const t = BOARD_CONFIG.tiles.find((x) => x.id === Number(tid));
+      return hasHousesInCountry(room, t);
+    });
+    if (blocked) {
+      room.pendingTrade = null;
+      return broadcastRoom(code);
+    }
+
     fromP.money = fromP.money - trade.offerMoney + trade.requestMoney;
     toP.money = toP.money + trade.offerMoney - trade.requestMoney;
 
-    // Если кредитор обнулил долг должника в рамках сделки
     if (trade.forgiveDebt) {
       if (toP.money < 0 && toP.owedToId === fromP.id) {
         toP.money = 0;

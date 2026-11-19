@@ -18,26 +18,155 @@ import {
   Skull,
   OctagonX,
   X,
+  Trash2,
+  Trophy,
 } from 'lucide-react';
 
 // ============================================================================
 // НАСТРОЙКИ TELEGRAM БОТА
 // ============================================================================
-const BOT_USERNAME = 'uzmonopoly_bot'; // Юзернейм бота без @
-const MINI_APP_NAME = 'game'; // Short name из BotFather (/newapp)
+const BOT_USERNAME = 'uzmonopoly_bot';
+const MINI_APP_NAME = 'game';
 
 const SERVER_URL = import.meta.env.DEV ? 'http://localhost:3001' : undefined;
 const socket = io(SERVER_URL);
 
 const GRID_SIZE = BOARD_CONFIG.gridSize || 7;
 
-// Универсальный расчёт координат по часовой стрелке с верхнего левого угла для любой сетки NxN
+// ============================================================================
+// СЛОВАРЬ ФЛАГОВ ДЛЯ СТРАН (circle-flags)
+// Если страны нет в словаре (и не указан tile.flag), иконка не отображается
+// ============================================================================
+const COUNTRY_FLAG_CODES = {
+  // Узбекистан и регионы
+  "o'zbekiston": 'uz',
+  'ozbekiston': 'uz',
+  uzbekistan: 'uz',
+  surxondaryo: 'uz',
+  "qoraqalpog'iston": 'uz',
+  qoraqalpogiston: 'uz',
+  xorazm: 'uz',
+  buxoro: 'uz',
+  sirdaryo: 'uz',
+  vodiy: 'uz',
+  poytaxt: 'uz',
+  toshkent: 'uz',
+  // Страны мира (на узбекском, русском и английском)
+  braziliya: 'br',
+  brazil: 'br',
+  бразилия: 'br',
+  turkiya: 'tr',
+  turkey: 'tr',
+  турция: 'tr',
+  rossiya: 'ru',
+  russia: 'ru',
+  россия: 'ru',
+  aqsh: 'us',
+  usa: 'us',
+  сша: 'us',
+  germaniya: 'de',
+  germany: 'de',
+  германия: 'de',
+  fransiya: 'fr',
+  france: 'fr',
+  франция: 'fr',
+  italiya: 'it',
+  italy: 'it',
+  италия: 'it',
+  ispaniya: 'es',
+  spain: 'es',
+  испания: 'es',
+  angliya: 'gb',
+  britaniya: 'gb',
+  uk: 'gb',
+  великобритания: 'gb',
+  yaponiya: 'jp',
+  japan: 'jp',
+  япония: 'jp',
+  koreya: 'kr',
+  korea: 'kr',
+  корея: 'kr',
+  xitoy: 'cn',
+  china: 'cn',
+  китай: 'cn',
+  baa: 'ae',
+  dubay: 'ae',
+  uae: 'ae',
+  оаэ: 'ae',
+  qozogiston: 'kz',
+  "qozog'iston": 'kz',
+  kazakhstan: 'kz',
+  казахстан: 'kz',
+  hindiston: 'in',
+  india: 'in',
+  индия: 'in',
+  kanada: 'ca',
+  canada: 'ca',
+  канада: 'ca',
+  avstraliya: 'au',
+  australia: 'au',
+  австралия: 'au',
+  shveytsariya: 'ch',
+  switzerland: 'ch',
+  швейцария: 'ch',
+  misr: 'eg',
+  egypt: 'eg',
+  египет: 'eg',
+  argentina: 'ar',
+  аргентина: 'ar',
+};
+
+const getCountryFlagUrl = (tile) => {
+  if (tile.flag) {
+    return `https://kapowaz.github.io/circle-flags/flags/${tile.flag.toLowerCase()}.svg`;
+  }
+  if (!tile.country) return null;
+  const normalized = tile.country.toLowerCase().replace(/[‘’`]/g, "'").trim();
+  const code = COUNTRY_FLAG_CODES[normalized];
+  return code ? `https://kapowaz.github.io/circle-flags/flags/${code}.svg` : null;
+};
+
+// Координаты клеток в сетке NxN по часовой стрелке от левого верхнего угла
 const getTileGridPosition = (index) => {
   const side = GRID_SIZE - 1;
   if (index <= side) return { row: 1, col: index + 1 };
   if (index <= side * 2) return { row: index - side + 1, col: GRID_SIZE };
   if (index <= side * 3) return { row: GRID_SIZE, col: GRID_SIZE - (index - side * 2) };
   return { row: GRID_SIZE - (index - side * 3), col: 1 };
+};
+
+// Позиционирование круглой иконки флага на внутреннем крае клетки (наполовину выступает к центру)
+const getFlagEdgePlacement = (row, col) => {
+  // Угловые клетки не являются городами, но на случай расширения проверяем стороны
+  if (row === 1 && col > 1 && col < GRID_SIZE) {
+    // Верхний ряд -> нижний край (выступает вниз к центру)
+    return {
+      posClass: 'bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2',
+      paddingFix: 'pb-1.5',
+    };
+  }
+  if (row === GRID_SIZE && col > 1 && col < GRID_SIZE) {
+    // Нижний ряд -> верхний край (выступает вверх к центру)
+    return {
+      posClass: 'top-0 left-1/2 -translate-x-1/2 -translate-y-1/2',
+      paddingFix: 'pt-1.5',
+    };
+  }
+  if (col === 1 && row > 1 && row < GRID_SIZE) {
+    // Левый столбец -> правый край (выступает вправо к центру)
+    return {
+      posClass: 'right-0 top-1/2 translate-x-1/2 -translate-y-1/2',
+      paddingFix: 'pr-1.5',
+    };
+  }
+  if (col === GRID_SIZE && row > 1 && row < GRID_SIZE) {
+    // Правый столбец -> левый край (выступает влево к центру)
+    return {
+      posClass: 'left-0 top-1/2 -translate-x-1/2 -translate-y-1/2',
+      paddingFix: 'pl-1.5',
+    };
+  }
+  return { posClass: 'top-0 left-1/2 -translate-x-1/2 -translate-y-1/2', paddingFix: '' };
 };
 
 export default function App() {
@@ -61,10 +190,9 @@ export default function App() {
   const [copiedType, setCopiedType] = useState(null);
   const inputRefs = useRef([]);
 
-  // Выбранная карточка для просмотра информации об аренде
   const [selectedTile, setSelectedTile] = useState(null);
 
-  // Состояние торгового предложения
+  // Состояние торговли
   const [tradeModalOpen, setTradeModalOpen] = useState(false);
   const [tradeTargetId, setTradeTargetId] = useState('');
   const [offerMoney, setOfferMoney] = useState(0);
@@ -75,7 +203,6 @@ export default function App() {
   const [requestJailCard, setRequestJailCard] = useState(false);
   const [forgiveDebt, setForgiveDebt] = useState(false);
 
-  // Инициализация Telegram WebApp: берём обычное имя (first_name + last_name), без @username
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
     if (tg) {
@@ -104,11 +231,8 @@ export default function App() {
     }
   }, []);
 
-  // Подписка на события сервера
   useEffect(() => {
-    const handleRoomUpdate = (updatedRoom) => {
-      setRoomData(updatedRoom);
-    };
+    const handleRoomUpdate = (updatedRoom) => setRoomData(updatedRoom);
     const handleKicked = ({ targetId }) => {
       if (targetId === playerId) {
         setActiveRoomCode('');
@@ -125,7 +249,6 @@ export default function App() {
     };
   }, [playerId]);
 
-  // Ввод 5-значного кода [ _ _ _ _ _ ]
   const handleCodeChange = (index, value) => {
     const clean = value.toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (!clean) return;
@@ -165,7 +288,6 @@ export default function App() {
     inputRefs.current[Math.min(pasted.length, 4)]?.focus();
   };
 
-  // Создание и вход в комнату
   const handleCreateRoom = () => {
     setLoading(true);
     setErrorMsg('');
@@ -197,7 +319,6 @@ export default function App() {
     });
   };
 
-  // Простое копирование ссылок без закрытия игры
   const getWebShareLink = () => `${window.location.origin}/?room=${activeRoomCode}`;
   const getTelegramShareLink = () =>
     MINI_APP_NAME
@@ -210,7 +331,15 @@ export default function App() {
     setTimeout(() => setCopiedType(null), 2000);
   };
 
-  // Игровые действия
+  // Проверка наличия домов в стране (группе) города
+  const hasHousesInCountry = (tile) => {
+    if (!tile || tile.type !== 'city' || !tile.group || !roomData) return false;
+    return BOARD_CONFIG.tiles.some(
+      (t) => t.type === 'city' && t.group === tile.group && (roomData.properties?.[t.id]?.houses || 0) > 0
+    );
+  };
+
+  // Действия
   const startGame = () => socket.emit('start_game', { code: activeRoomCode, playerId });
   const leaveRoom = () => {
     socket.emit('leave_room', { code: activeRoomCode, playerId });
@@ -226,6 +355,10 @@ export default function App() {
   const buyCurrentTile = () => socket.emit('buy_tile', { code: activeRoomCode, playerId });
   const buildHouse = (tileId) =>
     socket.emit('build_house', { code: activeRoomCode, playerId, tileId });
+  const sellHouse = (tileId) =>
+    socket.emit('sell_house', { code: activeRoomCode, playerId, tileId });
+  const sellTile = (tileId) =>
+    socket.emit('sell_tile', { code: activeRoomCode, playerId, tileId });
   const payBailOrUseCard = (useCard) =>
     socket.emit('leave_jail', { code: activeRoomCode, playerId, useCard });
   const endTurn = () => socket.emit('end_turn', { code: activeRoomCode, playerId });
@@ -491,20 +624,27 @@ export default function App() {
   const isMyTurn = currentPlayer?.id === playerId && roomData.status === 'playing' && !me?.bankrupt;
   const currentTile = me ? BOARD_CONFIG.tiles[me.position] : null;
 
-  // Покупка доступна в любой момент своего хода (в том числе после дубля), кроме клетки Dam olish
   const canBuyCurrent =
     isMyTurn &&
     me.money >= 0 &&
     currentTile &&
     currentTile.type !== 'parking' &&
-    (currentTile.type === 'city' || currentTile.type === 'station') &&
+    (currentTile.type === 'city' ||
+      currentTile.type === 'station' ||
+      currentTile.type === 'company') &&
     !roomData.properties?.[currentTile.id] &&
     me.money >= currentTile.price;
 
-  // Проверяем, является ли выбранный партнёр по торговле нашим должником
   const targetPlayerObj = roomData.players.find((p) => p.id === tradeTargetId);
   const canForgiveTargetDebt =
     targetPlayerObj && targetPlayerObj.money < 0 && targetPlayerObj.owedToId === playerId;
+
+  const winnerPlayer =
+    roomData.players.find((p) => p.id === roomData.winnerId) ||
+    roomData.players.find((p) => !p.bankrupt);
+
+  // Адаптивный размер круглой иконки флага под любой GRID_SIZE (7x7 .. 13x13+)
+  const flagPixelSize = `clamp(11px, calc(15vw / ${GRID_SIZE}), 22px)`;
 
   return (
     <div className="min-h-screen bg-[#0b1120] text-slate-100 flex flex-col lg:flex-row p-2 sm:p-4 gap-4">
@@ -522,7 +662,9 @@ export default function App() {
               const { row, col } = getTileGridPosition(tile.id);
               const prop = roomData.properties?.[tile.id];
               const owner = prop ? roomData.players.find((p) => p.id === prop.ownerId) : null;
-              const isClickable = tile.type === 'city' || tile.type === 'station';
+              const isClickable = tile.type === 'city' || tile.type === 'station' || tile.type === 'company';
+              const flagUrl = tile.type === 'city' ? getCountryFlagUrl(tile) : null;
+              const edgePlacement = getFlagEdgePlacement(row, col);
 
               return (
                 <div
@@ -531,64 +673,83 @@ export default function App() {
                   style={{
                     gridRow: row,
                     gridColumn: col,
-                    borderColor: owner ? owner.color : '#334155',
-                    backgroundColor: owner ? `${owner.color}22` : '#1e293b',
                   }}
-                  className={`relative border-2 rounded-lg flex flex-col justify-between overflow-hidden select-none p-1 transition-colors ${
-                    isClickable ? 'cursor-pointer hover:brightness-110' : ''
-                  }`}
+                  className={`relative select-none ${isClickable ? 'cursor-pointer group' : ''}`}
                 >
-                  {tile.group ? (
-                    <div
-                      className="h-2 sm:h-2.5 w-full rounded-sm flex items-center justify-center gap-0.5"
-                      style={{ backgroundColor: tile.group }}
-                    >
-                      {Array.from({ length: prop?.houses || 0 }).map((_, i) => (
-                        <span key={i} className="w-1.5 h-1.5 bg-white rounded-full" />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="h-1" />
-                  )}
-
-                  {/* Название клетки с бегущей строкой на узких экранах */}
-                  <div className="text-center leading-tight my-auto px-0.5 overflow-hidden">
-                    <div className="overflow-hidden w-full">
-                      <span
-                        className={`text-[9px] sm:text-[11px] font-bold text-slate-100 ${
-                          tile.name.length > 7 ? 'animate-marquee sm:animate-none' : ''
-                        }`}
-                      >
-                        {tile.name}
-                      </span>
-                    </div>
-                    {tile.price && (
-                      <div className="text-[8px] sm:text-[10px] font-mono text-emerald-400">
-                        {tile.price}$
-                      </div>
-                    )}
-                    {tile.subtext && (
-                      <div className="text-[8px] sm:text-[10px] text-slate-400">{tile.subtext}</div>
-                    )}
-                  </div>
-
-                  {/* Имя владельца внизу клетки */}
-                  <div className="h-3 flex items-center justify-center overflow-hidden">
-                    {owner && (
+                  {/* Внутренняя карточка клетки */}
+                  <div
+                    style={{
+                      borderColor: owner ? owner.color : '#334155',
+                      backgroundColor: owner ? `${owner.color}22` : '#1e293b',
+                    }}
+                    className={`w-full h-full border-2 rounded-lg flex flex-col justify-between overflow-hidden p-0.5 sm:p-1 transition-colors group-hover:brightness-110 ${
+                      flagUrl ? edgePlacement.paddingFix : ''
+                    }`}
+                  >
+                    {tile.group ? (
                       <div
-                        className="w-full overflow-hidden rounded px-1 text-center"
-                        style={{ backgroundColor: owner.color }}
+                        className="h-1.5 sm:h-2 w-full rounded-sm flex items-center justify-center gap-0.5 shrink-0"
+                        style={{ backgroundColor: tile.group }}
                       >
+                        {Array.from({ length: prop?.houses || 0 }).map((_, i) => (
+                          <span key={i} className="w-1.5 h-1.5 bg-white rounded-full" />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="h-0.5 shrink-0" />
+                    )}
+
+                    {/* Название клетки и цена */}
+                    <div className="text-center leading-tight my-auto px-0.5 overflow-hidden">
+                      <div className="overflow-hidden w-full">
                         <span
-                          className={`text-[7px] sm:text-[9px] font-bold text-white ${
-                            owner.name.length > 7 ? 'animate-marquee sm:animate-none' : ''
+                          className={`text-[9px] sm:text-[11px] font-bold text-slate-100 ${
+                            tile.name.length > 7 ? 'animate-marquee sm:animate-none' : ''
                           }`}
                         >
-                          {owner.name}
+                          {tile.name}
                         </span>
                       </div>
-                    )}
+                      {tile.price && (
+                        <div className="text-[8px] sm:text-[10px] font-mono text-emerald-400 leading-tight">
+                          {tile.price}$
+                        </div>
+                      )}
+                      {tile.subtext && (
+                        <div className="text-[8px] sm:text-[10px] text-slate-400 leading-tight">
+                          {tile.subtext}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Ник владельца (исправлена высота и отступы, чтобы низ букв не обрезался) */}
+                    <div className="min-h-[14px] flex items-center justify-center overflow-hidden shrink-0">
+                      {owner && (
+                        <div
+                          className="w-full overflow-hidden rounded px-1 py-[1px] text-center leading-none"
+                          style={{ backgroundColor: owner.color }}
+                        >
+                          <span
+                            className={`block text-[8px] sm:text-[9px] font-bold text-white leading-tight ${
+                              owner.name.length > 7 ? 'animate-marquee sm:animate-none' : ''
+                            }`}
+                          >
+                            {owner.name}
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Круглая иконка флага на внутреннем крае клетки (наполовину выступает к центру) */}
+                  {flagUrl && (
+                    <img
+                      src={flagUrl}
+                      alt={tile.country || ''}
+                      style={{ width: flagPixelSize, height: flagPixelSize }}
+                      className={`pointer-events-none absolute z-10 rounded-full ring-1 ring-slate-900 shadow-md object-cover ${edgePlacement.posClass}`}
+                    />
+                  )}
                 </div>
               );
             })}
@@ -613,8 +774,28 @@ export default function App() {
               </div>
 
               {roomData.status === 'finished' ? (
-                <div className="text-sm sm:text-base font-bold text-amber-400">
-                  O‘yin yakunlandi!
+                <div className="flex flex-col items-center gap-3 py-2">
+                  <div className="flex items-center gap-2 text-amber-400 font-extrabold text-base sm:text-xl">
+                    <Trophy className="w-6 h-6" />
+                    <span>O‘yin yakunlandi!</span>
+                  </div>
+                  {winnerPlayer && (
+                    <div className="text-xs sm:text-sm text-slate-300">
+                      G‘olib:{' '}
+                      <span
+                        className="font-extrabold text-base sm:text-lg px-2 py-0.5 rounded-lg bg-slate-800"
+                        style={{ color: winnerPlayer.color }}
+                      >
+                        {winnerPlayer.name}
+                      </span>
+                    </div>
+                  )}
+                  <button
+                    onClick={leaveRoom}
+                    className="mt-1 px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-xs sm:text-sm font-bold rounded-xl flex items-center gap-2 shadow-lg transition"
+                  >
+                    <LogOut className="w-4 h-4" /> Xonadan chiqish
+                  </button>
                 </div>
               ) : (
                 <>
@@ -640,7 +821,7 @@ export default function App() {
                     <div className="flex flex-wrap items-center justify-center gap-2">
                       {me.money < 0 ? (
                         <div className="text-[11px] text-rose-400 bg-rose-500/10 border border-rose-500/30 px-3 py-1.5 rounded-lg max-w-xs">
-                          Balansingiz manfiy ({me.money}$)! Tosh tashlash uchun savdo qiling yoki bankrot tugmasini bosing.
+                          Balansingiz manfiy ({me.money}$)! Tosh tashlash uchun mulk soting, savdo qiling yoki bankrot tugmasini bosing.
                         </div>
                       ) : (
                         <>
@@ -700,7 +881,7 @@ export default function App() {
           </div>
 
           {/* ФИШКИ ИГРОКОВ */}
-          <div className="pointer-events-none absolute inset-1.5 sm:inset-2">
+          <div className="pointer-events-none absolute inset-1.5 sm:inset-2 z-20">
             {roomData.players
               .filter((p) => !p.bankrupt)
               .map((p, idx) => {
@@ -730,7 +911,6 @@ export default function App() {
 
       {/* ПРАВАЯ ПАНЕЛЬ */}
       <div className="w-full lg:w-96 flex flex-col gap-3">
-        {/* Копирование ссылок и управление выходом/завершением игры */}
         <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-3 space-y-2.5">
           <div className="flex items-center justify-between gap-2">
             <div>
@@ -899,12 +1079,12 @@ export default function App() {
           </div>
         )}
 
-        {/* Мои города (постройка домов только при сборе всей страны) */}
+        {/* Мои владения: постройка/удаление домов (50%) и продажа города (50%, если нет домов в стране) */}
         <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-3 space-y-2">
           <div className="text-xs font-bold uppercase text-slate-400 flex items-center gap-1.5">
             <Building2 className="w-3.5 h-3.5" /> Mening mulklarim
           </div>
-          <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+          <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
             {Object.entries(roomData.properties || {})
               .filter(([, prop]) => prop.ownerId === playerId)
               .map(([tid, prop]) => {
@@ -919,49 +1099,86 @@ export default function App() {
                   countryCities.every((c) => roomData.properties[c.id]?.ownerId === playerId);
 
                 const maxHouses = (tile.rents?.length || 1) - 1;
+                const housesCount = prop.houses || 0;
+                const countryHasHouses = hasHousesInCountry(tile);
 
                 return (
                   <div
                     key={tid}
                     onClick={() => setSelectedTile(tile)}
-                    className="flex items-center justify-between px-2.5 py-1.5 bg-slate-900 rounded-lg text-xs cursor-pointer hover:bg-slate-800"
+                    className="flex items-center justify-between px-2.5 py-1.5 bg-slate-900 rounded-lg text-xs cursor-pointer hover:bg-slate-800 gap-1"
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 truncate">
                       <span
-                        className="w-2.5 h-2.5 rounded-sm"
+                        className="w-2.5 h-2.5 rounded-sm shrink-0"
                         style={{ backgroundColor: tile.group || '#64748b' }}
                       />
-                      <span className="font-medium">{tile.name}</span>
+                      <span className="font-medium truncate">{tile.name}</span>
                       {tile.type === 'city' && (
-                        <span className="text-[10px] text-slate-400">
-                          ({prop.houses || 0}/{maxHouses} uy)
+                        <span className="text-[10px] text-slate-400 shrink-0">
+                          ({housesCount}/{maxHouses})
                         </span>
                       )}
                     </div>
-                    {tile.type === 'city' && (prop.houses || 0) < maxHouses && (
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      {/* Построить дом */}
+                      {tile.type === 'city' && housesCount < maxHouses && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            buildHouse(tile.id);
+                          }}
+                          disabled={!hasFullCountry || (me?.money || 0) < tile.houseCost}
+                          title={
+                            !hasFullCountry
+                              ? 'Uy qurish uchun shu davlatning barcha shaharlarini yig‘ing'
+                              : `Uy qurish (-${tile.houseCost}$)`
+                          }
+                          className="px-1.5 py-0.5 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-35 rounded text-[10px] font-semibold flex items-center gap-0.5"
+                        >
+                          <Home className="w-3 h-3" /> +{tile.houseCost}$
+                        </button>
+                      )}
+
+                      {/* Удалить дом (+50% стоимости) */}
+                      {tile.type === 'city' && housesCount > 0 && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            sellHouse(tile.id);
+                          }}
+                          title={`Uyni buzish (+${Math.floor(tile.houseCost / 2)}$)`}
+                          className="px-1.5 py-0.5 bg-amber-600/80 hover:bg-amber-600 rounded text-[10px] font-semibold"
+                        >
+                          -Uy (+{Math.floor(tile.houseCost / 2)}$)
+                        </button>
+                      )}
+
+                      {/* Удалить/продать город банку (+50% стоимости, если в стране нет домов) */}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          buildHouse(tile.id);
+                          sellTile(tile.id);
                         }}
-                        disabled={!hasFullCountry || (me?.money || 0) < tile.houseCost}
+                        disabled={countryHasHouses}
                         title={
-                          !hasFullCountry
-                            ? 'Uy qurish uchun shu davlatning barcha shaharlarini yig‘ing'
-                            : 'Uy qurish'
+                          countryHasHouses
+                            ? 'Bu davlatda uy borligi sababli shaharni sotib bo‘lmaydi'
+                            : `Shaharni bankka sotish (+${Math.floor(tile.price / 2)}$)`
                         }
-                        className="px-2 py-0.5 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-35 rounded text-[10px] font-semibold flex items-center gap-1"
+                        className="px-1.5 py-0.5 bg-rose-600/80 hover:bg-rose-600 disabled:opacity-30 rounded text-[10px] font-semibold flex items-center gap-0.5"
                       >
-                        <Home className="w-3 h-3" /> +{tile.houseCost}$
+                        <Trash2 className="w-3 h-3" /> +{Math.floor(tile.price / 2)}$
                       </button>
-                    )}
+                    </div>
                   </div>
                 );
               })}
           </div>
         </div>
 
-        {/* История игры (новые записи сверху, имена игроков в их цветах) */}
+        {/* История игры */}
         <div className="flex-1 bg-[#1e293b] border border-slate-700 rounded-xl p-3 flex flex-col min-h-[150px]">
           <span className="text-xs font-bold uppercase text-slate-400 mb-1.5">O‘yin tarixi</span>
           <div className="flex-1 max-h-48 overflow-y-auto flex flex-col-reverse gap-1 text-[11px] text-slate-300 pr-1">
@@ -986,7 +1203,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* МОДАЛЬНОЕ ОКНО ИНФОРМАЦИИ О КАРТОЧКЕ ГОРОДА / СТАНЦИИ */}
+      {/* МОДАЛЬНОЕ ОКНО ИНФОРМАЦИИ О КАРТОЧКЕ */}
       {selectedTile && (
         <div
           onClick={() => setSelectedTile(null)}
@@ -1000,11 +1217,20 @@ export default function App() {
               className="p-3.5 flex items-center justify-between text-white font-bold"
               style={{ backgroundColor: selectedTile.group || '#334155' }}
             >
-              <div>
-                <div className="text-base">{selectedTile.name}</div>
-                {selectedTile.country && (
-                  <div className="text-[11px] opacity-90">{selectedTile.country}</div>
+              <div className="flex items-center gap-2.5">
+                {selectedTile.type === 'city' && getCountryFlagUrl(selectedTile) && (
+                  <img
+                    src={getCountryFlagUrl(selectedTile)}
+                    alt=""
+                    className="w-6 h-6 rounded-full ring-1 ring-white/60"
+                  />
                 )}
+                <div>
+                  <div className="text-base">{selectedTile.name}</div>
+                  {selectedTile.country && (
+                    <div className="text-[11px] opacity-90">{selectedTile.country}</div>
+                  )}
+                </div>
               </div>
               <button onClick={() => setSelectedTile(null)} className="p-1 hover:bg-black/20 rounded-lg">
                 <X className="w-4 h-4" />
@@ -1050,12 +1276,28 @@ export default function App() {
                   ))}
                 </div>
               )}
+
+              {selectedTile.type === 'company' && (
+                <div className="space-y-1.5 pt-1">
+                  <div className="text-[11px] uppercase text-slate-400 font-bold">
+                    Kompaniyalar soniga qarab to‘lov:
+                  </div>
+                  {(BOARD_CONFIG.companyMultipliers || [4, 10]).map((mult, cIdx) => (
+                    <div key={cIdx} className="flex justify-between text-slate-300">
+                      <span>{cIdx + 1} ta kompaniya bo‘lsa:</span>
+                      <span className="font-mono font-bold text-white">
+                        tashlangan tosh × {mult}$
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* МОДАЛЬНОЕ ОКНО ТОРГОВЛИ */}
+      {/* МОДАЛЬНОЕ ОКНО ТОРГОВЛИ (нельзя выбрать города стран, где есть дома) */}
       {tradeModalOpen && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
           <div className="w-full max-w-md bg-[#1e293b] border border-slate-700 rounded-2xl p-5 space-y-4 text-xs">
@@ -1123,10 +1365,16 @@ export default function App() {
                     .filter(([, prop]) => prop.ownerId === playerId)
                     .map(([tid]) => {
                       const t = BOARD_CONFIG.tiles.find((x) => x.id === Number(tid));
+                      const blocked = hasHousesInCountry(t);
                       return (
-                        <label key={tid} className="flex items-center gap-1.5">
+                        <label
+                          key={tid}
+                          title={blocked ? 'Bu davlatda uy borligi uchun almashib bo‘lmaydi' : ''}
+                          className={`flex items-center gap-1.5 ${blocked ? 'opacity-40 cursor-not-allowed' : ''}`}
+                        >
                           <input
                             type="checkbox"
+                            disabled={blocked}
                             checked={offerTiles.includes(Number(tid))}
                             onChange={(e) =>
                               setOfferTiles((prev) =>
@@ -1168,10 +1416,16 @@ export default function App() {
                     .filter(([, prop]) => prop.ownerId === tradeTargetId)
                     .map(([tid]) => {
                       const t = BOARD_CONFIG.tiles.find((x) => x.id === Number(tid));
+                      const blocked = hasHousesInCountry(t);
                       return (
-                        <label key={tid} className="flex items-center gap-1.5">
+                        <label
+                          key={tid}
+                          title={blocked ? 'Bu davlatda uy borligi uchun almashib bo‘lmaydi' : ''}
+                          className={`flex items-center gap-1.5 ${blocked ? 'opacity-40 cursor-not-allowed' : ''}`}
+                        >
                           <input
                             type="checkbox"
+                            disabled={blocked}
                             checked={requestTiles.includes(Number(tid))}
                             onChange={(e) =>
                               setRequestTiles((prev) =>
