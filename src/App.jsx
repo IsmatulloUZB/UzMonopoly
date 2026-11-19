@@ -4,7 +4,6 @@ import BOARD_CONFIG from '../boardConfig.json';
 import {
   Dices,
   Users,
-  Send,
   Copy,
   Check,
   ArrowLeftRight,
@@ -15,24 +14,30 @@ import {
   ShieldAlert,
   Coins,
   Building2,
+  UserX,
+  Skull,
+  OctagonX,
+  X,
 } from 'lucide-react';
 
 // ============================================================================
 // НАСТРОЙКИ TELEGRAM БОТА
 // ============================================================================
 const BOT_USERNAME = 'uzmonopoly_bot'; // Юзернейм бота без @
-const MINI_APP_NAME = 'game'; // Short name из BotFather (/newapp). Оставьте '' если кнопка меню
+const MINI_APP_NAME = 'game'; // Short name из BotFather (/newapp)
 
-// Подключение к серверу (на Render.com подключается к текущему домену автоматически)
 const SERVER_URL = import.meta.env.DEV ? 'http://localhost:3001' : undefined;
 const socket = io(SERVER_URL);
 
-// Координаты клеток в сетке 7x7 (по часовой стрелке от левого верхнего угла)
+const GRID_SIZE = BOARD_CONFIG.gridSize || 7;
+
+// Универсальный расчёт координат по часовой стрелке с верхнего левого угла для любой сетки NxN
 const getTileGridPosition = (index) => {
-  if (index <= 6) return { row: 1, col: index + 1 };
-  if (index <= 11) return { row: index - 5, col: 7 };
-  if (index <= 18) return { row: 7, col: 7 - (index - 12) };
-  return { row: 7 - (index - 18), col: 1 };
+  const side = GRID_SIZE - 1;
+  if (index <= side) return { row: 1, col: index + 1 };
+  if (index <= side * 2) return { row: index - side + 1, col: GRID_SIZE };
+  if (index <= side * 3) return { row: GRID_SIZE, col: GRID_SIZE - (index - side * 2) };
+  return { row: GRID_SIZE - (index - side * 3), col: 1 };
 };
 
 export default function App() {
@@ -56,6 +61,9 @@ export default function App() {
   const [copiedType, setCopiedType] = useState(null);
   const inputRefs = useRef([]);
 
+  // Выбранная карточка для просмотра информации об аренде
+  const [selectedTile, setSelectedTile] = useState(null);
+
   // Состояние торгового предложения
   const [tradeModalOpen, setTradeModalOpen] = useState(false);
   const [tradeTargetId, setTradeTargetId] = useState('');
@@ -65,8 +73,9 @@ export default function App() {
   const [requestTiles, setRequestTiles] = useState([]);
   const [offerJailCard, setOfferJailCard] = useState(false);
   const [requestJailCard, setRequestJailCard] = useState(false);
+  const [forgiveDebt, setForgiveDebt] = useState(false);
 
-  // Инициализация Telegram WebApp и чтение кода из ссылки
+  // Инициализация Telegram WebApp: берём обычное имя (first_name + last_name), без @username
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
     if (tg) {
@@ -74,11 +83,9 @@ export default function App() {
       tg.expand();
       const user = tg.initDataUnsafe?.user;
       if (user) {
-        const tgName = user.username
-          ? `@${user.username}`
-          : [user.first_name, user.last_name].filter(Boolean).join(' ');
-        if (tgName) {
-          setNickname(tgName);
+        const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
+        if (fullName) {
+          setNickname(fullName);
           setIsTelegramUser(true);
         }
       }
@@ -97,16 +104,26 @@ export default function App() {
     }
   }, []);
 
-  // Подписка на обновления комнаты от сервера
+  // Подписка на события сервера
   useEffect(() => {
     const handleRoomUpdate = (updatedRoom) => {
       setRoomData(updatedRoom);
     };
+    const handleKicked = ({ targetId }) => {
+      if (targetId === playerId) {
+        setActiveRoomCode('');
+        setRoomData(null);
+        setErrorMsg('Siz xona egasi tomonidan o‘yindan chetlatildingiz.');
+      }
+    };
+
     socket.on('room_update', handleRoomUpdate);
+    socket.on('player_kicked', handleKicked);
     return () => {
       socket.off('room_update', handleRoomUpdate);
+      socket.off('player_kicked', handleKicked);
     };
-  }, []);
+  }, [playerId]);
 
   // Ввод 5-значного кода [ _ _ _ _ _ ]
   const handleCodeChange = (index, value) => {
@@ -148,23 +165,18 @@ export default function App() {
     inputRefs.current[Math.min(pasted.length, 4)]?.focus();
   };
 
-  // Создание и вход в комнату через Socket.io
+  // Создание и вход в комнату
   const handleCreateRoom = () => {
     setLoading(true);
     setErrorMsg('');
-    socket.emit(
-      'create_room',
-      { playerId, nickname, password: roomPassword },
-      (res) => {
-        setLoading(false);
-        if (res.error) {
-          setErrorMsg(res.error);
-        } else {
-          setActiveRoomCode(res.room.code);
-          setRoomData(res.room);
-        }
+    socket.emit('create_room', { playerId, nickname, password: roomPassword }, (res) => {
+      setLoading(false);
+      if (res.error) setErrorMsg(res.error);
+      else {
+        setActiveRoomCode(res.room.code);
+        setRoomData(res.room);
       }
-    );
+    });
   };
 
   const handleJoinRoom = () => {
@@ -175,22 +187,17 @@ export default function App() {
     }
     setLoading(true);
     setErrorMsg('');
-    socket.emit(
-      'join_room',
-      { playerId, nickname, code, password: roomPassword },
-      (res) => {
-        setLoading(false);
-        if (res.error) {
-          setErrorMsg(res.error);
-        } else {
-          setActiveRoomCode(res.room.code);
-          setRoomData(res.room);
-        }
+    socket.emit('join_room', { playerId, nickname, code, password: roomPassword }, (res) => {
+      setLoading(false);
+      if (res.error) setErrorMsg(res.error);
+      else {
+        setActiveRoomCode(res.room.code);
+        setRoomData(res.room);
       }
-    );
+    });
   };
 
-  // Ссылки приглашения
+  // Простое копирование ссылок без закрытия игры
   const getWebShareLink = () => `${window.location.origin}/?room=${activeRoomCode}`;
   const getTelegramShareLink = () =>
     MINI_APP_NAME
@@ -203,23 +210,24 @@ export default function App() {
     setTimeout(() => setCopiedType(null), 2000);
   };
 
-  const shareViaTelegram = () => {
-    const tgLink = getTelegramShareLink();
-    const text = encodeURIComponent(`UzMonopoly o‘yiniga qo‘shiling! Xona kodi: ${activeRoomCode}`);
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(tgLink)}&text=${text}`;
-    if (window.Telegram?.WebApp?.openTelegramLink) {
-      window.Telegram.WebApp.openTelegramLink(shareUrl);
-    } else {
-      window.open(shareUrl, '_blank');
-    }
-  };
-
-  // Действия игрока
+  // Игровые действия
   const startGame = () => socket.emit('start_game', { code: activeRoomCode, playerId });
+  const leaveRoom = () => {
+    socket.emit('leave_room', { code: activeRoomCode, playerId });
+    setActiveRoomCode('');
+    setRoomData(null);
+  };
+  const kickPlayer = (targetId) =>
+    socket.emit('kick_player', { code: activeRoomCode, hostId: playerId, targetId });
+  const endGameByHost = () => socket.emit('end_game', { code: activeRoomCode, hostId: playerId });
+  const declareBankrupt = () => socket.emit('declare_bankrupt', { code: activeRoomCode, playerId });
+
   const rollDice = () => socket.emit('roll_dice', { code: activeRoomCode, playerId });
   const buyCurrentTile = () => socket.emit('buy_tile', { code: activeRoomCode, playerId });
-  const buildHouse = (tileId) => socket.emit('build_house', { code: activeRoomCode, playerId, tileId });
-  const payBailOrUseCard = (useCard) => socket.emit('leave_jail', { code: activeRoomCode, playerId, useCard });
+  const buildHouse = (tileId) =>
+    socket.emit('build_house', { code: activeRoomCode, playerId, tileId });
+  const payBailOrUseCard = (useCard) =>
+    socket.emit('leave_jail', { code: activeRoomCode, playerId, useCard });
   const endTurn = () => socket.emit('end_turn', { code: activeRoomCode, playerId });
 
   const sendTradeOffer = () => {
@@ -235,6 +243,7 @@ export default function App() {
         requestTiles,
         offerJailCard,
         requestJailCard,
+        forgiveDebt,
       },
     });
     setTradeModalOpen(false);
@@ -244,6 +253,7 @@ export default function App() {
     setRequestTiles([]);
     setOfferJailCard(false);
     setRequestJailCard(false);
+    setForgiveDebt(false);
   };
 
   const respondTrade = (accept) => {
@@ -272,7 +282,7 @@ export default function App() {
 
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1.5">
-              O‘yinchi ismi (Nik) {isTelegramUser && <span className="text-sky-400">(Telegram)</span>}
+              O‘yinchi ismi {isTelegramUser && <span className="text-sky-400">(Telegram)</span>}
             </label>
             <input
               type="text"
@@ -368,7 +378,7 @@ export default function App() {
           </div>
 
           <div className="bg-slate-900/80 border border-slate-700/80 rounded-xl p-4 space-y-3">
-            <p className="text-xs text-slate-400 font-medium">Xona havolasini ulashish:</p>
+            <p className="text-xs text-slate-400 font-medium">Xona havolasini nusxalash:</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <button
                 onClick={() => copyLink(getWebShareLink(), 'web')}
@@ -382,17 +392,26 @@ export default function App() {
                 ) : (
                   <>
                     <Copy className="w-4 h-4 text-slate-300" />
-                    <span>Sayt havolasi (?room=)</span>
+                    <span>Sayt havolasi</span>
                   </>
                 )}
               </button>
 
               <button
-                onClick={shareViaTelegram}
+                onClick={() => copyLink(getTelegramShareLink(), 'tg')}
                 className="flex items-center justify-center gap-2 py-2.5 px-3 bg-sky-600 hover:bg-sky-500 rounded-xl text-xs font-semibold text-white transition"
               >
-                <Send className="w-4 h-4" />
-                <span>Telegram orqali ulashish</span>
+                {copiedType === 'tg' ? (
+                  <>
+                    <Check className="w-4 h-4 text-white" />
+                    <span>Telegram havolasi nusxalandi!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4" />
+                    <span>Telegram havolasini nusxalash</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -414,11 +433,22 @@ export default function App() {
                     <span className="w-3.5 h-3.5 rounded-full shadow" style={{ backgroundColor: p.color }} />
                     <span className="font-semibold text-sm">{p.name}</span>
                   </div>
-                  {p.id === roomData.hostId && (
-                    <span className="text-[11px] px-2 py-0.5 bg-emerald-500/20 text-emerald-300 rounded-md font-medium">
-                      Xona egasi
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {p.id === roomData.hostId && (
+                      <span className="text-[11px] px-2 py-0.5 bg-emerald-500/20 text-emerald-300 rounded-md font-medium">
+                        Xona egasi
+                      </span>
+                    )}
+                    {isHost && p.id !== playerId && (
+                      <button
+                        onClick={() => kickPlayer(p.id)}
+                        title="O‘yinchini chiqarib yuborish"
+                        className="p-1 text-rose-400 hover:bg-rose-500/20 rounded-lg transition"
+                      >
+                        <UserX className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -426,10 +456,7 @@ export default function App() {
 
           <div className="flex gap-3 pt-2">
             <button
-              onClick={() => {
-                setActiveRoomCode('');
-                setRoomData(null);
-              }}
+              onClick={leaveRoom}
               className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl flex items-center gap-1.5"
             >
               <LogOut className="w-4 h-4" /> Chiqish
@@ -460,36 +487,56 @@ export default function App() {
   // ============================================================================
   const currentPlayer = roomData.players[roomData.turnIndex];
   const me = roomData.players.find((p) => p.id === playerId);
-  const isMyTurn = currentPlayer?.id === playerId && roomData.status === 'playing';
+  const isHost = roomData.hostId === playerId;
+  const isMyTurn = currentPlayer?.id === playerId && roomData.status === 'playing' && !me?.bankrupt;
   const currentTile = me ? BOARD_CONFIG.tiles[me.position] : null;
+
+  // Покупка доступна в любой момент своего хода (в том числе после дубля), кроме клетки Dam olish
   const canBuyCurrent =
     isMyTurn &&
-    roomData.hasRolled &&
+    me.money >= 0 &&
     currentTile &&
+    currentTile.type !== 'parking' &&
     (currentTile.type === 'city' || currentTile.type === 'station') &&
     !roomData.properties?.[currentTile.id] &&
     me.money >= currentTile.price;
 
+  // Проверяем, является ли выбранный партнёр по торговле нашим должником
+  const targetPlayerObj = roomData.players.find((p) => p.id === tradeTargetId);
+  const canForgiveTargetDebt =
+    targetPlayerObj && targetPlayerObj.money < 0 && targetPlayerObj.owedToId === playerId;
+
   return (
     <div className="min-h-screen bg-[#0b1120] text-slate-100 flex flex-col lg:flex-row p-2 sm:p-4 gap-4">
+      {/* ЛЕВАЯ ЧАСТЬ: ИГРОВАЯ ДОСКА NxN */}
       <div className="flex-1 flex items-center justify-center">
-        <div className="relative w-full max-w-[740px] aspect-square bg-[#111827] border-2 border-slate-700 rounded-2xl p-1.5 sm:p-2 shadow-2xl">
-          <div className="w-full h-full grid grid-cols-7 grid-rows-7 gap-1">
+        <div className="relative w-full max-w-[85vh] aspect-square bg-[#111827] border-2 border-slate-700 rounded-2xl p-1.5 sm:p-2 shadow-2xl">
+          <div
+            className="w-full h-full grid gap-1"
+            style={{
+              gridTemplateColumns: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
+              gridTemplateRows: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
+            }}
+          >
             {BOARD_CONFIG.tiles.map((tile) => {
               const { row, col } = getTileGridPosition(tile.id);
               const prop = roomData.properties?.[tile.id];
               const owner = prop ? roomData.players.find((p) => p.id === prop.ownerId) : null;
+              const isClickable = tile.type === 'city' || tile.type === 'station';
 
               return (
                 <div
                   key={tile.id}
+                  onClick={() => isClickable && setSelectedTile(tile)}
                   style={{
                     gridRow: row,
                     gridColumn: col,
                     borderColor: owner ? owner.color : '#334155',
-                    backgroundColor: owner ? `${owner.color}20` : '#1e293b',
+                    backgroundColor: owner ? `${owner.color}22` : '#1e293b',
                   }}
-                  className="relative border-2 rounded-lg flex flex-col justify-between overflow-hidden select-none p-1 transition-colors"
+                  className={`relative border-2 rounded-lg flex flex-col justify-between overflow-hidden select-none p-1 transition-colors ${
+                    isClickable ? 'cursor-pointer hover:brightness-110' : ''
+                  }`}
                 >
                   {tile.group ? (
                     <div
@@ -504,9 +551,16 @@ export default function App() {
                     <div className="h-1" />
                   )}
 
-                  <div className="text-center leading-tight my-auto px-0.5">
-                    <div className="text-[9px] sm:text-[11px] font-bold text-slate-100 truncate">
-                      {tile.name}
+                  {/* Название клетки с бегущей строкой на узких экранах */}
+                  <div className="text-center leading-tight my-auto px-0.5 overflow-hidden">
+                    <div className="overflow-hidden w-full">
+                      <span
+                        className={`text-[9px] sm:text-[11px] font-bold text-slate-100 ${
+                          tile.name.length > 7 ? 'animate-marquee sm:animate-none' : ''
+                        }`}
+                      >
+                        {tile.name}
+                      </span>
                     </div>
                     {tile.price && (
                       <div className="text-[8px] sm:text-[10px] font-mono text-emerald-400">
@@ -518,21 +572,37 @@ export default function App() {
                     )}
                   </div>
 
-                  <div className="h-2.5 flex items-center justify-center">
+                  {/* Имя владельца внизу клетки */}
+                  <div className="h-3 flex items-center justify-center overflow-hidden">
                     {owner && (
-                      <span
-                        className="text-[7px] sm:text-[9px] font-bold px-1 rounded truncate max-w-full text-white"
+                      <div
+                        className="w-full overflow-hidden rounded px-1 text-center"
                         style={{ backgroundColor: owner.color }}
                       >
-                        {owner.name}
-                      </span>
+                        <span
+                          className={`text-[7px] sm:text-[9px] font-bold text-white ${
+                            owner.name.length > 7 ? 'animate-marquee sm:animate-none' : ''
+                          }`}
+                        >
+                          {owner.name}
+                        </span>
+                      </div>
                     )}
                   </div>
                 </div>
               );
             })}
 
-            <div className="col-start-2 col-end-7 row-start-2 row-end-7 bg-[#0f172a]/90 border border-slate-800 rounded-xl flex flex-col items-center justify-center p-3 text-center gap-3">
+            {/* ЦЕНТР ДОСКИ */}
+            <div
+              style={{
+                gridColumnStart: 2,
+                gridColumnEnd: GRID_SIZE,
+                gridRowStart: 2,
+                gridRowEnd: GRID_SIZE,
+              }}
+              className="bg-[#0f172a]/90 border border-slate-800 rounded-xl flex flex-col items-center justify-center p-3 text-center gap-2.5"
+            >
               <div className="flex items-center gap-2">
                 <span className="text-lg sm:text-2xl font-extrabold tracking-tight bg-gradient-to-r from-emerald-400 to-sky-400 bg-clip-text text-transparent">
                   UzMonopoly
@@ -542,84 +612,102 @@ export default function App() {
                 </span>
               </div>
 
-              <div className="flex items-center gap-3">
-                {roomData.dice.map((val, idx) => (
-                  <div
-                    key={idx}
-                    className="w-10 h-10 sm:w-12 sm:h-12 bg-slate-800 border-2 border-slate-600 rounded-xl flex items-center justify-center text-lg sm:text-xl font-extrabold text-white shadow-inner"
-                  >
-                    {val}
+              {roomData.status === 'finished' ? (
+                <div className="text-sm sm:text-base font-bold text-amber-400">
+                  O‘yin yakunlandi!
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3">
+                    {roomData.dice.map((val, idx) => (
+                      <div
+                        key={idx}
+                        className="w-10 h-10 sm:w-12 sm:h-12 bg-slate-800 border-2 border-slate-600 rounded-xl flex items-center justify-center text-lg sm:text-xl font-extrabold text-white shadow-inner"
+                      >
+                        {val}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
 
-              <div className="text-xs sm:text-sm text-slate-300">
-                Navbat:{' '}
-                <span className="font-bold" style={{ color: currentPlayer?.color }}>
-                  {currentPlayer?.name}
-                </span>
-              </div>
+                  <div className="text-xs sm:text-sm text-slate-300">
+                    Navbat:{' '}
+                    <span className="font-bold" style={{ color: currentPlayer?.color }}>
+                      {currentPlayer?.name}
+                    </span>
+                  </div>
 
-              {isMyTurn && (
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  {!roomData.hasRolled ? (
-                    <button
-                      onClick={rollDice}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold rounded-xl flex items-center gap-1.5 shadow-lg transition"
-                    >
-                      <Dices className="w-4 h-4" /> Tosh tashlash
-                    </button>
-                  ) : (
-                    <>
-                      {canBuyCurrent && (
-                        <button
-                          onClick={buyCurrentTile}
-                          className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl flex items-center gap-1 transition"
-                        >
-                          <Coins className="w-4 h-4" /> Sotib olish ({currentTile.price}$)
-                        </button>
+                  {isMyTurn && (
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      {me.money < 0 ? (
+                        <div className="text-[11px] text-rose-400 bg-rose-500/10 border border-rose-500/30 px-3 py-1.5 rounded-lg max-w-xs">
+                          Balansingiz manfiy ({me.money}$)! Tosh tashlash uchun savdo qiling yoki bankrot tugmasini bosing.
+                        </div>
+                      ) : (
+                        <>
+                          {!roomData.hasRolled && (
+                            <button
+                              onClick={rollDice}
+                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold rounded-xl flex items-center gap-1.5 shadow-lg transition"
+                            >
+                              <Dices className="w-4 h-4" /> Tosh tashlash
+                            </button>
+                          )}
+
+                          {canBuyCurrent && (
+                            <button
+                              onClick={buyCurrentTile}
+                              className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl flex items-center gap-1 transition"
+                            >
+                              <Coins className="w-4 h-4" /> Sotib olish ({currentTile.price}$)
+                            </button>
+                          )}
+
+                          {roomData.hasRolled && (
+                            <button
+                              onClick={endTurn}
+                              className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl transition"
+                            >
+                              Navbatni berish
+                            </button>
+                          )}
+                        </>
                       )}
-                      <button
-                        onClick={endTurn}
-                        className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl transition"
-                      >
-                        Navbatni berish
-                      </button>
-                    </>
-                  )}
 
-                  {me?.inJail && !roomData.hasRolled && (
-                    <div className="flex gap-1.5 w-full justify-center mt-1">
-                      <button
-                        onClick={() => payBailOrUseCard(false)}
-                        disabled={me.money < BOARD_CONFIG.jailFine}
-                        className="px-2.5 py-1 bg-rose-600/80 hover:bg-rose-600 disabled:opacity-40 text-[11px] font-semibold rounded-lg"
-                      >
-                        Jarima ({BOARD_CONFIG.jailFine}$)
-                      </button>
-                      {me.jailFreeCards > 0 && (
-                        <button
-                          onClick={() => payBailOrUseCard(true)}
-                          className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-[11px] font-semibold rounded-lg"
-                        >
-                          Karta ishlatish ({me.jailFreeCards})
-                        </button>
+                      {me?.inJail && !roomData.hasRolled && (
+                        <div className="flex gap-1.5 w-full justify-center mt-1">
+                          <button
+                            onClick={() => payBailOrUseCard(false)}
+                            disabled={me.money < BOARD_CONFIG.jailFine}
+                            className="px-2.5 py-1 bg-rose-600/80 hover:bg-rose-600 disabled:opacity-40 text-[11px] font-semibold rounded-lg"
+                          >
+                            Jarima ({BOARD_CONFIG.jailFine}$)
+                          </button>
+                          {me.jailFreeCards > 0 && (
+                            <button
+                              onClick={() => payBailOrUseCard(true)}
+                              className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-[11px] font-semibold rounded-lg"
+                            >
+                              Karta ishlatish ({me.jailFreeCards})
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
-                </div>
+                </>
               )}
             </div>
           </div>
 
+          {/* ФИШКИ ИГРОКОВ */}
           <div className="pointer-events-none absolute inset-1.5 sm:inset-2">
             {roomData.players
               .filter((p) => !p.bankrupt)
               .map((p, idx) => {
                 const { row, col } = getTileGridPosition(p.position);
-                const cellSize = 100 / 7;
-                const offsetX = ((idx % 3) - 1) * 1.6;
-                const offsetY = (Math.floor(idx / 3) - 0.5) * 1.6;
+                const cellSize = 100 / GRID_SIZE;
+                const offsetX = ((idx % 3) - 1) * 1.4;
+                const offsetY = (Math.floor(idx / 3) - 0.5) * 1.4;
 
                 return (
                   <div
@@ -632,7 +720,7 @@ export default function App() {
                     title={p.name}
                     className="absolute -translate-x-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 rounded-full border-2 border-white shadow-lg transition-all duration-500 ease-out flex items-center justify-center text-[8px] font-bold text-white"
                   >
-                    {p.name.replace('@', '')[0]?.toUpperCase()}
+                    {p.name[0]?.toUpperCase()}
                   </div>
                 );
               })}
@@ -640,39 +728,73 @@ export default function App() {
         </div>
       </div>
 
+      {/* ПРАВАЯ ПАНЕЛЬ */}
       <div className="w-full lg:w-96 flex flex-col gap-3">
-        <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-3 flex items-center justify-between gap-2">
-          <div>
-            <span className="text-[11px] text-slate-400 block">Do‘stlarni chaqirish:</span>
-            <span className="font-mono text-sm font-bold text-emerald-400">{activeRoomCode}</span>
+        {/* Копирование ссылок и управление выходом/завершением игры */}
+        <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-3 space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <span className="text-[11px] text-slate-400 block">Xona kodi:</span>
+              <span className="font-mono text-sm font-bold text-emerald-400">{activeRoomCode}</span>
+            </div>
+            <div className="flex gap-1.5">
+              <button
+                onClick={() => copyLink(getWebShareLink(), 'web')}
+                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-xs font-medium flex items-center gap-1"
+              >
+                {copiedType === 'web' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>Sayt</span>
+              </button>
+              <button
+                onClick={() => copyLink(getTelegramShareLink(), 'tg')}
+                className="px-2.5 py-1.5 bg-sky-600 hover:bg-sky-500 rounded-lg text-xs font-medium flex items-center gap-1"
+              >
+                {copiedType === 'tg' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>Telegram</span>
+              </button>
+            </div>
           </div>
-          <div className="flex gap-2">
+
+          <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-700/70">
             <button
-              onClick={() => copyLink(getWebShareLink(), 'web')}
-              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-xs font-medium flex items-center gap-1"
+              onClick={leaveRoom}
+              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[11px] font-semibold flex items-center gap-1"
             >
-              {copiedType === 'web' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>Sayt</span>
+              <LogOut className="w-3.5 h-3.5" /> Chiqish
             </button>
-            <button
-              onClick={shareViaTelegram}
-              className="px-2.5 py-1.5 bg-sky-600 hover:bg-sky-500 rounded-lg text-xs font-medium flex items-center gap-1"
-            >
-              <Send className="w-3.5 h-3.5" />
-              <span>Telegram</span>
-            </button>
+
+            {me && !me.bankrupt && roomData.status === 'playing' && (
+              <button
+                onClick={declareBankrupt}
+                className="px-2.5 py-1.5 bg-rose-900/60 hover:bg-rose-800 border border-rose-700 text-rose-200 rounded-lg text-[11px] font-semibold flex items-center gap-1"
+              >
+                <Skull className="w-3.5 h-3.5" /> Bankrot
+              </button>
+            )}
+
+            {isHost && roomData.status === 'playing' && (
+              <button
+                onClick={endGameByHost}
+                className="ml-auto px-2.5 py-1.5 bg-amber-900/60 hover:bg-amber-800 border border-amber-700 text-amber-200 rounded-lg text-[11px] font-semibold flex items-center gap-1"
+              >
+                <OctagonX className="w-3.5 h-3.5" /> O‘yinni tugatish
+              </button>
+            )}
           </div>
         </div>
 
+        {/* Список игроков */}
         <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-3 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase text-slate-400">O‘yinchilar</span>
-            <button
-              onClick={() => setTradeModalOpen(true)}
-              className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-semibold flex items-center gap-1"
-            >
-              <ArrowLeftRight className="w-3.5 h-3.5" /> Almashish
-            </button>
+            {me && !me.bankrupt && roomData.status === 'playing' && (
+              <button
+                onClick={() => setTradeModalOpen(true)}
+                className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-semibold flex items-center gap-1"
+              >
+                <ArrowLeftRight className="w-3.5 h-3.5" /> Almashish
+              </button>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -680,27 +802,55 @@ export default function App() {
               <div
                 key={p.id}
                 className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs ${
-                  p.id === currentPlayer?.id
+                  p.id === currentPlayer?.id && !p.bankrupt
                     ? 'bg-slate-800 border-emerald-500/60'
                     : 'bg-slate-900/60 border-slate-800'
-                } ${p.bankrupt ? 'opacity-40 line-through' : ''}`}
+                } ${p.bankrupt ? 'opacity-50' : ''}`}
               >
                 <div className="flex items-center gap-2 truncate">
                   <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
-                  <span className="font-semibold truncate">{p.name}</span>
-                  {p.inJail && <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
-                  {p.jailFreeCards > 0 && (
+                  <span className={`font-semibold truncate ${p.bankrupt ? 'line-through' : ''}`}>
+                    {p.name}
+                  </span>
+                  {p.bankrupt && (
+                    <span className="text-[10px] px-1.5 bg-slate-800 text-slate-400 rounded">
+                      Kuzatuvchi
+                    </span>
+                  )}
+                  {p.inJail && !p.bankrupt && (
+                    <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  )}
+                  {p.jailFreeCards > 0 && !p.bankrupt && (
                     <span className="px-1.5 py-0.2 bg-indigo-500/20 text-indigo-300 rounded text-[10px]">
                       Karta x{p.jailFreeCards}
                     </span>
                   )}
                 </div>
-                <span className="font-mono font-bold text-emerald-400">{p.money}$</span>
+
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`font-mono font-bold ${
+                      p.money < 0 ? 'text-rose-400' : 'text-emerald-400'
+                    }`}
+                  >
+                    {p.money}$
+                  </span>
+                  {isHost && p.id !== playerId && !p.bankrupt && (
+                    <button
+                      onClick={() => kickPlayer(p.id)}
+                      title="O‘yindan chiqarib yuborish (Kick)"
+                      className="p-1 text-rose-400 hover:bg-rose-500/20 rounded transition"
+                    >
+                      <UserX className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
         </div>
 
+        {/* Входящее предложение обмена */}
         {roomData.pendingTrade && roomData.pendingTrade.toId === playerId && (
           <div className="bg-indigo-950/90 border border-indigo-500 rounded-xl p-3 space-y-2 text-xs">
             <div className="font-bold text-indigo-300">
@@ -711,6 +861,7 @@ export default function App() {
               <span className="text-slate-400">Sizga beradi: </span>
               <span className="text-emerald-400 font-semibold">
                 {roomData.pendingTrade.offerMoney}$
+                {roomData.pendingTrade.forgiveDebt ? ' + Qarzingizni kechirish (0$)' : ''}
                 {roomData.pendingTrade.offerJailCard ? ' + Qamoq kartasi' : ''}
                 {roomData.pendingTrade.offerTiles.length > 0 &&
                   ' + ' +
@@ -748,9 +899,10 @@ export default function App() {
           </div>
         )}
 
+        {/* Мои города (постройка домов только при сборе всей страны) */}
         <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-3 space-y-2">
           <div className="text-xs font-bold uppercase text-slate-400 flex items-center gap-1.5">
-            <Building2 className="w-3.5 h-3.5" /> Mening shaharlarim
+            <Building2 className="w-3.5 h-3.5" /> Mening mulklarim
           </div>
           <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
             {Object.entries(roomData.properties || {})
@@ -758,10 +910,21 @@ export default function App() {
               .map(([tid, prop]) => {
                 const tile = BOARD_CONFIG.tiles.find((t) => t.id === Number(tid));
                 if (!tile) return null;
+
+                const countryCities = BOARD_CONFIG.tiles.filter(
+                  (t) => t.type === 'city' && t.group === tile.group
+                );
+                const hasFullCountry =
+                  tile.type === 'city' &&
+                  countryCities.every((c) => roomData.properties[c.id]?.ownerId === playerId);
+
+                const maxHouses = (tile.rents?.length || 1) - 1;
+
                 return (
                   <div
                     key={tid}
-                    className="flex items-center justify-between px-2.5 py-1.5 bg-slate-900 rounded-lg text-xs"
+                    onClick={() => setSelectedTile(tile)}
+                    className="flex items-center justify-between px-2.5 py-1.5 bg-slate-900 rounded-lg text-xs cursor-pointer hover:bg-slate-800"
                   >
                     <div className="flex items-center gap-2">
                       <span
@@ -770,14 +933,24 @@ export default function App() {
                       />
                       <span className="font-medium">{tile.name}</span>
                       {tile.type === 'city' && (
-                        <span className="text-[10px] text-slate-400">({prop.houses || 0}/4 uy)</span>
+                        <span className="text-[10px] text-slate-400">
+                          ({prop.houses || 0}/{maxHouses} uy)
+                        </span>
                       )}
                     </div>
-                    {tile.type === 'city' && (prop.houses || 0) < 4 && (
+                    {tile.type === 'city' && (prop.houses || 0) < maxHouses && (
                       <button
-                        onClick={() => buildHouse(tile.id)}
-                        disabled={(me?.money || 0) < tile.houseCost}
-                        className="px-2 py-0.5 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-40 rounded text-[10px] font-semibold flex items-center gap-1"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          buildHouse(tile.id);
+                        }}
+                        disabled={!hasFullCountry || (me?.money || 0) < tile.houseCost}
+                        title={
+                          !hasFullCountry
+                            ? 'Uy qurish uchun shu davlatning barcha shaharlarini yig‘ing'
+                            : 'Uy qurish'
+                        }
+                        className="px-2 py-0.5 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-35 rounded text-[10px] font-semibold flex items-center gap-1"
                       >
                         <Home className="w-3 h-3" /> +{tile.houseCost}$
                       </button>
@@ -788,18 +961,101 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex-1 bg-[#1e293b] border border-slate-700 rounded-xl p-3 flex flex-col min-h-[140px]">
+        {/* История игры (новые записи сверху, имена игроков в их цветах) */}
+        <div className="flex-1 bg-[#1e293b] border border-slate-700 rounded-xl p-3 flex flex-col min-h-[150px]">
           <span className="text-xs font-bold uppercase text-slate-400 mb-1.5">O‘yin tarixi</span>
-          <div className="flex-1 max-h-44 overflow-y-auto space-y-1 text-[11px] text-slate-300 pr-1">
+          <div className="flex-1 max-h-48 overflow-y-auto flex flex-col-reverse gap-1 text-[11px] text-slate-300 pr-1">
             {(roomData.logs || []).map((entry, idx) => (
-              <div key={idx} className="border-b border-slate-800/80 pb-1">
-                {String(entry)}
+              <div key={entry.id || idx} className="border-b border-slate-800/80 pb-1">
+                {entry.segments ? (
+                  entry.segments.map((seg, sIdx) => (
+                    <span
+                      key={sIdx}
+                      style={{ color: seg.color || undefined }}
+                      className={seg.bold ? 'font-bold' : ''}
+                    >
+                      {seg.text}
+                    </span>
+                  ))
+                ) : (
+                  <span>{String(entry)}</span>
+                )}
               </div>
             ))}
           </div>
         </div>
       </div>
 
+      {/* МОДАЛЬНОЕ ОКНО ИНФОРМАЦИИ О КАРТОЧКЕ ГОРОДА / СТАНЦИИ */}
+      {selectedTile && (
+        <div
+          onClick={() => setSelectedTile(null)}
+          className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-xs bg-[#1e293b] border border-slate-600 rounded-2xl overflow-hidden shadow-2xl text-xs"
+          >
+            <div
+              className="p-3.5 flex items-center justify-between text-white font-bold"
+              style={{ backgroundColor: selectedTile.group || '#334155' }}
+            >
+              <div>
+                <div className="text-base">{selectedTile.name}</div>
+                {selectedTile.country && (
+                  <div className="text-[11px] opacity-90">{selectedTile.country}</div>
+                )}
+              </div>
+              <button onClick={() => setSelectedTile(null)} className="p-1 hover:bg-black/20 rounded-lg">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-2.5 text-slate-200">
+              <div className="flex justify-between font-semibold border-b border-slate-700 pb-2">
+                <span>Sotib olish narxi:</span>
+                <span className="text-emerald-400 font-mono">{selectedTile.price}$</span>
+              </div>
+
+              {selectedTile.type === 'city' && (
+                <>
+                  <div className="flex justify-between font-semibold border-b border-slate-700 pb-2">
+                    <span>1 ta uy qurish narxi:</span>
+                    <span className="text-amber-400 font-mono">{selectedTile.houseCost}$</span>
+                  </div>
+                  <div className="space-y-1.5 pt-1">
+                    <div className="text-[11px] uppercase text-slate-400 font-bold">
+                      Ijara narxlari:
+                    </div>
+                    {selectedTile.rents.map((r, hIdx) => (
+                      <div key={hIdx} className="flex justify-between text-slate-300">
+                        <span>{hIdx === 0 ? 'Uysiz (asosiy)' : `${hIdx} ta uy bilan`}:</span>
+                        <span className="font-mono font-bold text-white">{r}$</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {selectedTile.type === 'station' && (
+                <div className="space-y-1.5 pt-1">
+                  <div className="text-[11px] uppercase text-slate-400 font-bold">
+                    Stansiyalar soniga qarab ijara:
+                  </div>
+                  {BOARD_CONFIG.stationRents.map((r, sIdx) => (
+                    <div key={sIdx} className="flex justify-between text-slate-300">
+                      <span>{sIdx + 1} ta stansiya bo‘lsa:</span>
+                      <span className="font-mono font-bold text-white">{r}$</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* МОДАЛЬНОЕ ОКНО ТОРГОВЛИ */}
       {tradeModalOpen && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
           <div className="w-full max-w-md bg-[#1e293b] border border-slate-700 rounded-2xl p-5 space-y-4 text-xs">
@@ -812,6 +1068,7 @@ export default function App() {
                 onChange={(e) => {
                   setTradeTargetId(e.target.value);
                   setRequestTiles([]);
+                  setForgiveDebt(false);
                 }}
                 className="w-full p-2 bg-slate-900 border border-slate-700 rounded-lg text-white"
               >
@@ -826,13 +1083,26 @@ export default function App() {
               </select>
             </div>
 
+            {canForgiveTargetDebt && (
+              <label className="flex items-center gap-2 p-2.5 bg-emerald-500/10 border border-emerald-500/40 rounded-xl text-emerald-300 font-semibold cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={forgiveDebt}
+                  onChange={(e) => setForgiveDebt(e.target.checked)}
+                />
+                <span>
+                  {targetPlayerObj.name}ning qarzini kechirish (hisobini 0$ ga tushirish)
+                </span>
+              </label>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-slate-900 p-3 rounded-xl space-y-2">
                 <div className="font-bold text-emerald-400">Siz berasiz:</div>
                 <input
                   type="number"
                   min={0}
-                  max={me?.money || 0}
+                  max={Math.max(0, me?.money || 0)}
                   value={offerMoney}
                   onChange={(e) => setOfferMoney(e.target.value)}
                   placeholder="Pul ($)"
@@ -883,7 +1153,7 @@ export default function App() {
                   placeholder="Pul ($)"
                   className="w-full p-1.5 bg-slate-800 border border-slate-700 rounded text-white"
                 />
-                {(roomData.players.find((p) => p.id === tradeTargetId)?.jailFreeCards || 0) > 0 && (
+                {(targetPlayerObj?.jailFreeCards || 0) > 0 && (
                   <label className="flex items-center gap-1.5 text-slate-300">
                     <input
                       type="checkbox"

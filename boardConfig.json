@@ -1,8 +1,11 @@
 {
+  "gridSize": 7,
   "startingMoney": 1500,
-  "passGoReward": 200,
+  "passStartReward": 200,
+  "landStartReward": 300,
   "jailFine": 50,
   "maxPlayers": 6,
+  "stationRents": [25, 50, 100, 200],
   "playerColors": [
     { "name": "Qizil", "hex": "#ef4444" },
     { "name": "Ko‘k", "hex": "#3b82f6" },
@@ -12,32 +15,32 @@
     { "name": "Pushti", "hex": "#ec4899" }
   ],
   "tiles": [
-    { "id": 0, "name": "START", "type": "go", "subtext": "+200$" },
-    { "id": 1, "name": "Termiz", "type": "city", "group": "#92400e", "price": 60, "rent": 10, "houseCost": 50 },
+    { "id": 0, "name": "START", "type": "start", "subtext": "+200$ / +300$" },
+    { "id": 1, "name": "Termiz", "type": "city", "country": "Surxondaryo", "group": "#92400e", "price": 60, "houseCost": 50, "rents": [10, 30, 90, 160, 250] },
     { "id": 2, "name": "Omad", "type": "chance", "subtext": "?" },
-    { "id": 3, "name": "Qarshi", "type": "city", "group": "#92400e", "price": 80, "rent": 14, "houseCost": 50 },
+    { "id": 3, "name": "Qarshi", "type": "city", "country": "Surxondaryo", "group": "#92400e", "price": 80, "houseCost": 50, "rents": [14, 40, 110, 200, 300] },
     { "id": 4, "name": "Soliq", "type": "tax", "amount": 100, "subtext": "-100$" },
-    { "id": 5, "name": "Nukus", "type": "city", "group": "#0284c7", "price": 100, "rent": 18, "houseCost": 50 },
+    { "id": 5, "name": "Nukus", "type": "city", "country": "Qoraqalpog‘iston", "group": "#0284c7", "price": 100, "houseCost": 50, "rents": [18, 50, 140, 260, 380] },
     { "id": 6, "name": "Qamoqxona", "type": "jail", "subtext": "Tashrif" },
 
-    { "id": 7, "name": "Urganch", "type": "city", "group": "#0284c7", "price": 120, "rent": 22, "houseCost": 50 },
-    { "id": 8, "name": "Xiva", "type": "city", "group": "#db2777", "price": 140, "rent": 26, "houseCost": 100 },
-    { "id": 9, "name": "Afrosiyob", "type": "station", "price": 150, "rent": 35 },
-    { "id": 10, "name": "Navoiy", "type": "city", "group": "#db2777", "price": 160, "rent": 30, "houseCost": 100 },
-    { "id": 11, "name": "Buxoro", "type": "city", "group": "#ea580c", "price": 180, "rent": 34, "houseCost": 100 },
+    { "id": 7, "name": "Urganch", "type": "city", "country": "Qoraqalpog‘iston", "group": "#0284c7", "price": 120, "houseCost": 50, "rents": [22, 60, 160, 300, 450] },
+    { "id": 8, "name": "Xiva", "type": "city", "country": "Xorazm", "group": "#db2777", "price": 140, "houseCost": 100, "rents": [26, 75, 190, 350, 520] },
+    { "id": 9, "name": "Afrosiyob", "type": "station", "price": 150 },
+    { "id": 10, "name": "Navoiy", "type": "city", "country": "Xorazm", "group": "#db2777", "price": 160, "houseCost": 100, "rents": [30, 85, 220, 400, 600] },
+    { "id": 11, "name": "Buxoro", "type": "city", "country": "Buxoro", "group": "#ea580c", "price": 180, "houseCost": 100, "rents": [34, 95, 250, 460, 680] },
 
-    { "id": 12, "name": "Bepul Dam", "type": "parking", "subtext": "Dam olish" },
-    { "id": 13, "name": "Jizzax", "type": "city", "group": "#ea580c", "price": 200, "rent": 38, "houseCost": 100 },
-    { "id": 14, "name": "Omad", "type": "chance", "subtext": "?" },
-    { "id": 15, "name": "Guliston", "type": "city", "group": "#dc2626", "price": 220, "rent": 42, "houseCost": 150 },
-    { "id": 16, "name": "Qo‘qon", "type": "city", "group": "#dc2626", "price": 240, "rent": 46, "houseCost": 150 },
+    { "id": 12, "name": "Dam olish", "type": "parking", "subtext": "Bepul" },
+    { "id": 13, "name": "Jizzax", "type": "city", "country": "Buxoro", "group": "#ea580c", "price": 200, "houseCost": 100, "rents": [38, 110, 280, 520, 750] },
+    { "id": 14, "name": "Sharq", "type": "station", "price": 150 },
+    { "id": 15, "name": "Guliston", "type": "city", "country": "Sirdaryo", "group": "#dc2626", "price": 220, "houseCost": 150, "rents": [42, 120, 310, 580, 820] },
+    { "id": 16, "name": "Qo‘qon", "type": "city", "country": "Sirdaryo", "group": "#dc2626", "price": 240, "houseCost": 150, "rents": [46, 130, 340, 640, 900] },
     { "id": 17, "name": "Bojxona", "type": "tax", "amount": 150, "subtext": "-150$" },
     { "id": 18, "name": "Qamoqqa!", "type": "gotojail", "subtext": "Politsiya" },
 
-    { "id": 19, "name": "Farg‘ona", "type": "city", "group": "#ca8a04", "price": 260, "rent": 50, "houseCost": 150 },
-    { "id": 20, "name": "Namangan", "type": "city", "group": "#ca8a04", "price": 280, "rent": 55, "houseCost": 150 },
-    { "id": 21, "name": "Andijon", "type": "city", "group": "#16a34a", "price": 300, "rent": 60, "houseCost": 200 },
-    { "id": 22, "name": "Samarqand", "type": "city", "group": "#16a34a", "price": 350, "rent": 70, "houseCost": 200 },
-    { "id": 23, "name": "Toshkent", "type": "city", "group": "#2563eb", "price": 400, "rent": 85, "houseCost": 200 }
+    { "id": 19, "name": "Farg‘ona", "type": "city", "country": "Vodiy", "group": "#ca8a04", "price": 260, "houseCost": 150, "rents": [50, 145, 380, 700, 980] },
+    { "id": 20, "name": "Namangan", "type": "city", "country": "Vodiy", "group": "#ca8a04", "price": 280, "houseCost": 150, "rents": [55, 160, 420, 760, 1050] },
+    { "id": 21, "name": "Andijon", "type": "city", "country": "Poytaxt", "group": "#16a34a", "price": 300, "houseCost": 200, "rents": [60, 180, 460, 820, 1150] },
+    { "id": 22, "name": "Samarqand", "type": "city", "country": "Poytaxt", "group": "#16a34a", "price": 350, "houseCost": 200, "rents": [70, 210, 520, 920, 1300] },
+    { "id": 23, "name": "Toshkent", "type": "city", "country": "Poytaxt", "group": "#2563eb", "price": 400, "houseCost": 200, "rents": [85, 250, 600, 1100, 1500] }
   ]
 }

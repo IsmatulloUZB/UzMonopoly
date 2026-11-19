@@ -18,7 +18,6 @@ const io = new Server(httpServer, {
   cors: { origin: '*' },
 });
 
-// Хранилище комнат в оперативной памяти сервера
 const rooms = new Map();
 
 const generateRoomCode = () => {
@@ -33,6 +32,19 @@ const generateRoomCode = () => {
   return code;
 };
 
+// Добавление лога с поддержкой цветных имён игроков
+const addLog = (room, segments) => {
+  room.logs.push({
+    id: Date.now() + Math.random(),
+    segments: Array.isArray(segments) ? segments : [{ text: String(segments) }],
+  });
+  if (room.logs.length > 50) {
+    room.logs = room.logs.slice(-50);
+  }
+};
+
+const playerSeg = (p) => ({ text: p.name, color: p.color, bold: true });
+
 const broadcastRoom = (roomCode) => {
   const room = rooms.get(roomCode);
   if (room) {
@@ -40,13 +52,56 @@ const broadcastRoom = (roomCode) => {
   }
 };
 
+const eliminatePlayer = (room, player) => {
+  player.bankrupt = true;
+  player.money = 0;
+  player.owedToId = null;
+  // Освобождаем всю недвижимость выбывшего игрока
+  Object.keys(room.properties).forEach((tid) => {
+    if (room.properties[tid].ownerId === player.id) {
+      delete room.properties[tid];
+    }
+  });
+};
+
+const checkGameWinner = (room) => {
+  const active = room.players.filter((p) => !p.bankrupt);
+  if (active.length <= 1 && room.status === 'playing') {
+    room.status = 'finished';
+    if (active[0]) {
+      addLog(room, [
+        { text: 'O‘yin tugadi! G‘olib: ' },
+        playerSeg(active[0]),
+        { text: '!' },
+      ]);
+    } else {
+      addLog(room, 'O‘yin tugadi!');
+    }
+    return true;
+  }
+  return false;
+};
+
+const advanceTurn = (room) => {
+  if (checkGameWinner(room)) return;
+  let nextIdx = (room.turnIndex + 1) % room.players.length;
+  let guard = 0;
+  while (room.players[nextIdx].bankrupt && guard < room.players.length) {
+    nextIdx = (nextIdx + 1) % room.players.length;
+    guard++;
+  }
+  room.turnIndex = nextIdx;
+  room.hasRolled = false;
+  room.doublesCount = 0;
+  addLog(room, [{ text: 'Navbat: ' }, playerSeg(room.players[nextIdx])]);
+};
+
 io.on('connection', (socket) => {
-  // 1. Создание новой комнаты
+  // 1. Создание комнаты
   socket.on('create_room', ({ playerId, nickname, password }, callback) => {
     if (!nickname?.trim()) {
-      return callback({ error: 'Iltimos, ismingizni (nik) kiriting!' });
+      return callback({ error: 'Iltimos, ismingizni kiriting!' });
     }
-
     const code = generateRoomCode();
     const newPlayer = {
       id: playerId,
@@ -59,6 +114,7 @@ io.on('connection', (socket) => {
       jailTurns: 0,
       jailFreeCards: 0,
       bankrupt: false,
+      owedToId: null,
     };
 
     const room = {
@@ -70,27 +126,27 @@ io.on('connection', (socket) => {
       turnIndex: 0,
       dice: [1, 1],
       hasRolled: false,
+      doublesCount: 0,
       properties: {},
       pendingTrade: null,
-      logs: [`${newPlayer.name} yangi xona yaratdi (${code}).`],
+      logs: [],
     };
 
+    addLog(room, [playerSeg(newPlayer), { text: ` yangi xona yaratdi (${code}).` }]);
     rooms.set(code, room);
     socket.join(code);
     callback({ room });
   });
 
-  // 2. Вход в существующую комнату
+  // 2. Вход в комнату
   socket.on('join_room', ({ playerId, nickname, code, password }, callback) => {
     if (!nickname?.trim()) {
-      return callback({ error: 'Iltimos, ismingizni (nik) kiriting!' });
+      return callback({ error: 'Iltimos, ismingizni kiriting!' });
     }
     const cleanCode = (code || '').toUpperCase().trim();
     const room = rooms.get(cleanCode);
 
-    if (!room) {
-      return callback({ error: 'Bunday kodli xona topilmadi!' });
-    }
+    if (!room) return callback({ error: 'Bunday kodli xona topilmadi!' });
     if (room.password && room.password !== (password || '').trim()) {
       return callback({ error: 'Xona paroli noto‘g‘ri!' });
     }
@@ -110,23 +166,27 @@ io.on('connection', (socket) => {
       return callback({ error: 'Xona to‘lgan!' });
     }
 
-    const colorObj =
+    const usedColors = new Set(room.players.map((p) => p.color));
+    const freeColor =
+      BOARD_CONFIG.playerColors.find((c) => !usedColors.has(c.hex)) ||
       BOARD_CONFIG.playerColors[room.players.length % BOARD_CONFIG.playerColors.length];
+
     const joinedPlayer = {
       id: playerId,
       socketId: socket.id,
       name: nickname.trim(),
       money: BOARD_CONFIG.startingMoney,
       position: 0,
-      color: colorObj.hex,
+      color: freeColor.hex,
       inJail: false,
       jailTurns: 0,
       jailFreeCards: 0,
       bankrupt: false,
+      owedToId: null,
     };
 
     room.players.push(joinedPlayer);
-    room.logs.push(`${joinedPlayer.name} xonaga qo‘shildi.`);
+    addLog(room, [playerSeg(joinedPlayer), { text: ' xonaga qo‘shildi.' }]);
     socket.join(cleanCode);
     broadcastRoom(cleanCode);
     callback({ room });
@@ -137,17 +197,105 @@ io.on('connection', (socket) => {
     const room = rooms.get(code);
     if (!room || room.hostId !== playerId || room.players.length < 2) return;
     room.status = 'playing';
-    room.logs.push('O‘yin boshlandi! Omad!');
+    room.doublesCount = 0;
+    addLog(room, 'O‘yin boshlandi! Omad!');
     broadcastRoom(code);
   });
 
-  // 4. Бросок кубиков
+  // 4. Выход игрока из комнаты по кнопке
+  socket.on('leave_room', ({ code, playerId }) => {
+    const room = rooms.get(code);
+    if (!room) return;
+    const pIdx = room.players.findIndex((p) => p.id === playerId);
+    if (pIdx === -1) return;
+    const leavingPlayer = room.players[pIdx];
+
+    if (room.status === 'waiting') {
+      room.players.splice(pIdx, 1);
+      if (room.players.length === 0) {
+        rooms.delete(code);
+        return;
+      }
+      if (room.hostId === playerId) {
+        room.hostId = room.players[0].id;
+      }
+      addLog(room, [playerSeg(leavingPlayer), { text: ' xonani tark etdi.' }]);
+    } else {
+      eliminatePlayer(room, leavingPlayer);
+      addLog(room, [playerSeg(leavingPlayer), { text: ' o‘yindan chiqdi.' }]);
+      if (room.hostId === playerId) {
+        const nextHost = room.players.find((p) => !p.bankrupt);
+        if (nextHost) room.hostId = nextHost.id;
+      }
+      if (room.turnIndex === pIdx && room.status === 'playing') {
+        advanceTurn(room);
+      } else {
+        checkGameWinner(room);
+      }
+    }
+    socket.leave(code);
+    broadcastRoom(code);
+  });
+
+  // 5. Кик игрока владельцем комнаты
+  socket.on('kick_player', ({ code, hostId, targetId }) => {
+    const room = rooms.get(code);
+    if (!room || room.hostId !== hostId || hostId === targetId) return;
+    const pIdx = room.players.findIndex((p) => p.id === targetId);
+    if (pIdx === -1) return;
+    const kicked = room.players[pIdx];
+
+    if (room.status === 'waiting') {
+      room.players.splice(pIdx, 1);
+    } else {
+      eliminatePlayer(room, kicked);
+      if (room.turnIndex === pIdx && room.status === 'playing') {
+        advanceTurn(room);
+      } else {
+        checkGameWinner(room);
+      }
+    }
+
+    addLog(room, [playerSeg(kicked), { text: ' xona egasi tomonidan chetlatildi.' }]);
+    io.to(code).emit('player_kicked', { targetId });
+    broadcastRoom(code);
+  });
+
+  // 6. Владелец комнаты завершает игру досрочно
+  socket.on('end_game', ({ code, hostId }) => {
+    const room = rooms.get(code);
+    if (!room || room.hostId !== hostId) return;
+    room.status = 'finished';
+    addLog(room, 'Xona egasi o‘yinni yakunladi.');
+    broadcastRoom(code);
+  });
+
+  // 7. Добровольное банкротство (игрок выбывает и остаётся наблюдателем)
+  socket.on('declare_bankrupt', ({ code, playerId }) => {
+    const room = rooms.get(code);
+    if (!room || room.status !== 'playing') return;
+    const pIdx = room.players.findIndex((p) => p.id === playerId);
+    if (pIdx === -1 || room.players[pIdx].bankrupt) return;
+
+    const p = room.players[pIdx];
+    eliminatePlayer(room, p);
+    addLog(room, [playerSeg(p), { text: ' bankrot deb e’lon qilindi va kuzatuvchiga aylandi.' }]);
+
+    if (room.turnIndex === pIdx) {
+      advanceTurn(room);
+    } else {
+      checkGameWinner(room);
+    }
+    broadcastRoom(code);
+  });
+
+  // 8. Бросок кубиков
   socket.on('roll_dice', ({ code, playerId }) => {
     const room = rooms.get(code);
     if (!room || room.status !== 'playing' || room.hasRolled) return;
 
     const p = room.players[room.turnIndex];
-    if (!p || p.id !== playerId) return;
+    if (!p || p.id !== playerId || p.bankrupt || p.money < 0) return;
 
     const d1 = Math.floor(Math.random() * 6) + 1;
     const d2 = Math.floor(Math.random() * 6) + 1;
@@ -155,24 +303,57 @@ io.on('connection', (socket) => {
     const isDouble = d1 === d2;
 
     room.dice = [d1, d2];
-    room.logs.push(`${p.name} tosh tashladi: ${d1} + ${d2} = ${steps}.`);
+    addLog(room, [
+      playerSeg(p),
+      { text: ` tosh tashladi: ${d1} + ${d2} = ${steps}${isDouble ? ' (DUBL!)' : ''}.` },
+    ]);
 
-    // Проверка тюрьмы
+    // Проверка на 3-й дубль подряд -> Тюрьма
+    if (!p.inJail && isDouble) {
+      room.doublesCount = (room.doublesCount || 0) + 1;
+      if (room.doublesCount >= 3) {
+        const jailIdx = BOARD_CONFIG.tiles.findIndex((t) => t.type === 'jail');
+        p.position = jailIdx !== -1 ? jailIdx : 6;
+        p.inJail = true;
+        p.jailTurns = 0;
+        room.doublesCount = 0;
+        room.hasRolled = true;
+        addLog(room, [
+          playerSeg(p),
+          { text: ' ketma-ket 3 marta dubl tashlagani uchun qamoqqa tushdi!' },
+        ]);
+        return broadcastRoom(code);
+      }
+    } else if (!isDouble) {
+      room.doublesCount = 0;
+    }
+
+    // Логика тюрьмы (выход после 3 неудачных бросков оставаясь в поле тюрьмы)
     if (p.inJail) {
       if (isDouble) {
         p.inJail = false;
         p.jailTurns = 0;
-        room.logs.push(`${p.name} dubl tashlab qamoqdan chiqdi!`);
-      } else if (p.jailTurns >= 2) {
-        p.money -= BOARD_CONFIG.jailFine;
-        p.inJail = false;
-        p.jailTurns = 0;
-        room.logs.push(`${p.name} ${BOARD_CONFIG.jailFine}$ jarima to‘lab qamoqdan chiqdi.`);
+        room.doublesCount = 0;
+        addLog(room, [playerSeg(p), { text: ' dubl tashlab qamoqdan chiqdi!' }]);
       } else {
         p.jailTurns += 1;
-        room.hasRolled = true;
-        room.logs.push(`${p.name} qamoqda qoldi.`);
-        return broadcastRoom(code);
+        if (p.jailTurns >= 3) {
+          p.inJail = false;
+          p.jailTurns = 0;
+          room.hasRolled = true;
+          addLog(room, [
+            playerSeg(p),
+            { text: ' 3 ta urinishdan so‘ng qamoqdan ozod bo‘ldi (qamoq maydonida qoldi).' },
+          ]);
+          return broadcastRoom(code);
+        } else {
+          room.hasRolled = true;
+          addLog(room, [
+            playerSeg(p),
+            { text: ` qamoqda qoldi (${p.jailTurns}/3 urinish).` },
+          ]);
+          return broadcastRoom(code);
+        }
       }
     }
 
@@ -181,24 +362,35 @@ io.on('connection', (socket) => {
     const totalTiles = BOARD_CONFIG.tiles.length;
     const newPos = (oldPos + steps) % totalTiles;
 
-    if (oldPos + steps >= totalTiles) {
-      p.money += BOARD_CONFIG.passGoReward;
-      room.logs.push(`${p.name} BOSH katagidan o‘tdi (+${BOARD_CONFIG.passGoReward}$).`);
+    if (newPos === 0) {
+      p.money += BOARD_CONFIG.landStartReward;
+      addLog(room, [
+        playerSeg(p),
+        { text: ` to‘g‘ri START katagiga tushdi (+${BOARD_CONFIG.landStartReward}$)!` },
+      ]);
+    } else if (oldPos + steps >= totalTiles) {
+      p.money += BOARD_CONFIG.passStartReward;
+      addLog(room, [
+        playerSeg(p),
+        { text: ` START katagidan o‘tdi (+${BOARD_CONFIG.passStartReward}$).` },
+      ]);
     }
-    p.position = newPos;
 
+    p.position = newPos;
     const landedTile = BOARD_CONFIG.tiles[newPos];
-    room.logs.push(`${p.name} "${landedTile.name}" katagiga tushdi.`);
+    addLog(room, [playerSeg(p), { text: ` "${landedTile.name}" katagiga tushdi.` }]);
 
     if (landedTile.type === 'tax') {
       p.money -= landedTile.amount;
-      room.logs.push(`${p.name} ${landedTile.amount}$ soliq to‘ladi.`);
+      p.owedToId = p.money < 0 ? 'bank' : null;
+      addLog(room, [playerSeg(p), { text: ` ${landedTile.amount}$ soliq to‘ladi.` }]);
     } else if (landedTile.type === 'gotojail') {
       const jailIdx = BOARD_CONFIG.tiles.findIndex((t) => t.type === 'jail');
       p.position = jailIdx !== -1 ? jailIdx : 6;
       p.inJail = true;
       p.jailTurns = 0;
-      room.logs.push(`${p.name} qamoqxonaga jo‘natildi!`);
+      room.doublesCount = 0;
+      addLog(room, [playerSeg(p), { text: ' qamoqxonaga jo‘natildi!' }]);
     } else if (landedTile.type === 'chance') {
       const events = [
         { text: 'Bank xatosi: +150$ oldingiz!', delta: 150 },
@@ -211,37 +403,73 @@ io.on('connection', (socket) => {
         p.jailFreeCards = (p.jailFreeCards || 0) + 1;
       } else {
         p.money += ev.delta;
+        if (p.money < 0) p.owedToId = 'bank';
       }
-      room.logs.push(`Omad kartasi: ${ev.text}`);
+      addLog(room, [{ text: `Omad kartasi: ${ev.text}` }]);
     } else if (landedTile.type === 'city' || landedTile.type === 'station') {
       const prop = room.properties[landedTile.id];
       if (prop && prop.ownerId !== p.id) {
         const owner = room.players.find((pl) => pl.id === prop.ownerId);
         if (owner && !owner.bankrupt) {
-          const rentToPay = landedTile.rent * (1 + (prop.houses || 0));
-          p.money -= rentToPay;
-          owner.money += rentToPay;
-          room.logs.push(`${p.name} ijara haqi sifatida ${owner.name}ga ${rentToPay}$ to‘ladi.`);
+          // В тюрьме игрок не получает прибыли
+          if (owner.inJail) {
+            addLog(room, [
+              playerSeg(owner),
+              { text: ' qamoqda bo‘lgani uchun ijara haqi olmadi.' },
+            ]);
+          } else {
+            let rentToPay = 0;
+            if (landedTile.type === 'city') {
+              const houses = prop.houses || 0;
+              rentToPay = landedTile.rents[houses] ?? landedTile.rents[0];
+            } else {
+              // Считаем сколько станций у владельца
+              const ownedStationsCount = BOARD_CONFIG.tiles.filter(
+                (t) => t.type === 'station' && room.properties[t.id]?.ownerId === owner.id
+              ).length;
+              const stationIdx = Math.max(
+                0,
+                Math.min(ownedStationsCount - 1, BOARD_CONFIG.stationRents.length - 1)
+              );
+              rentToPay = BOARD_CONFIG.stationRents[stationIdx];
+            }
+
+            p.money -= rentToPay;
+            owner.money += rentToPay;
+            if (p.money < 0) {
+              p.owedToId = owner.id;
+            }
+            addLog(room, [
+              playerSeg(p),
+              { text: ' ijara haqi sifatida ' },
+              playerSeg(owner),
+              { text: `ga ${rentToPay}$ to‘ladi.` },
+            ]);
+          }
         }
       }
     }
 
-    if (p.money < 0) {
-      p.bankrupt = true;
-      room.logs.push(`${p.name} bankrot bo‘ldi!`);
+    if (p.money >= 0) {
+      p.owedToId = null;
+    } else {
+      addLog(room, [
+        playerSeg(p),
+        { text: ' manfiy balansga tushdi! Savdo qiling yoki bankrot tugmasini bosing.' },
+      ]);
     }
 
-    room.hasRolled = !isDouble || p.inJail;
-    if (room.logs.length > 40) room.logs = room.logs.slice(-40);
+    // Если выпал дубль (и не попал в тюрьму / не в минусе), можно и купить клетку, и бросить снова
+    room.hasRolled = !isDouble || p.inJail || p.money < 0;
     broadcastRoom(code);
   });
 
-  // 5. Покупка текущей клетки
+  // 9. Покупка клетки (доступна даже если выпал дубль до повторного броска)
   socket.on('buy_tile', ({ code, playerId }) => {
     const room = rooms.get(code);
     if (!room) return;
     const p = room.players[room.turnIndex];
-    if (!p || p.id !== playerId) return;
+    if (!p || p.id !== playerId || p.money < 0) return;
 
     const tile = BOARD_CONFIG.tiles[p.position];
     if ((tile.type !== 'city' && tile.type !== 'station') || room.properties[tile.id]) return;
@@ -249,11 +477,14 @@ io.on('connection', (socket) => {
 
     p.money -= tile.price;
     room.properties[tile.id] = { ownerId: p.id, houses: 0 };
-    room.logs.push(`${p.name} "${tile.name}" shahrini ${tile.price}$ ga sotib oldi!`);
+    addLog(room, [
+      playerSeg(p),
+      { text: ` "${tile.name}" mulkini ${tile.price}$ ga sotib oldi!` },
+    ]);
     broadcastRoom(code);
   });
 
-  // 6. Строительство дома
+  // 10. Строительство дома (только если собраны все города этой страны/группы)
   socket.on('build_house', ({ code, playerId, tileId }) => {
     const room = rooms.get(code);
     if (!room) return;
@@ -262,16 +493,35 @@ io.on('connection', (socket) => {
     const p = room.players.find((pl) => pl.id === playerId);
 
     if (!tile || tile.type !== 'city' || !prop || prop.ownerId !== playerId || !p) return;
+
+    // Проверка монополии на всю страну/группу
+    const countryCities = BOARD_CONFIG.tiles.filter(
+      (t) => t.type === 'city' && t.group === tile.group
+    );
+    const ownsAll = countryCities.every((c) => room.properties[c.id]?.ownerId === playerId);
+    if (!ownsAll) return;
+
+    const maxHouses = (tile.rents?.length || 1) - 1;
     const currentHouses = prop.houses || 0;
-    if (currentHouses >= 4 || p.money < tile.houseCost) return;
+    if (currentHouses >= maxHouses || p.money < tile.houseCost) return;
+
+p.money -= tile.houseCost;
+prop.houses = currentHouses + 1;
+addLog(room, [
+  playerSeg(p),
+  { text: ` "${tile.name}" shahrida uy qurdi (${prop.houses}/${maxHouses}).` },
+]);
 
     p.money -= tile.houseCost;
     prop.houses = currentHouses + 1;
-    room.logs.push(`${p.name} "${tile.name}" shahrida uy qurdi (${prop.houses}/4).`);
+    addLog(room, [
+      playerSeg(p),
+      { text: ` "${tile.name}" shahrida uy qurdi (${prop.houses}/4).` },
+    ]);
     broadcastRoom(code);
   });
 
-  // 7. Выход из тюрьмы (штраф или карта)
+  // 11. Выход из тюрьмы за штраф или карту
   socket.on('leave_jail', ({ code, playerId, useCard }) => {
     const room = rooms.get(code);
     if (!room) return;
@@ -282,53 +532,42 @@ io.on('connection', (socket) => {
       p.jailFreeCards -= 1;
       p.inJail = false;
       p.jailTurns = 0;
-      room.logs.push(`${p.name} maxsus karta bilan qamoqdan chiqdi!`);
+      addLog(room, [playerSeg(p), { text: ' maxsus karta bilan qamoqdan chiqdi!' }]);
       broadcastRoom(code);
     } else if (!useCard && p.money >= BOARD_CONFIG.jailFine) {
       p.money -= BOARD_CONFIG.jailFine;
       p.inJail = false;
       p.jailTurns = 0;
-      room.logs.push(`${p.name} ${BOARD_CONFIG.jailFine}$ to‘lab qamoqdan chiqdi!`);
+      addLog(room, [
+        playerSeg(p),
+        { text: ` ${BOARD_CONFIG.jailFine}$ jarima to‘lab qamoqdan chiqdi!` },
+      ]);
       broadcastRoom(code);
     }
   });
 
-  // 8. Передача хода
+  // 12. Передача хода (нельзя передать, если баланс в минусе)
   socket.on('end_turn', ({ code, playerId }) => {
     const room = rooms.get(code);
     if (!room) return;
     const current = room.players[room.turnIndex];
-    if (!current || current.id !== playerId) return;
-
-    const activePlayers = room.players.filter((p) => !p.bankrupt);
-    if (activePlayers.length <= 1) {
-      room.status = 'finished';
-      room.logs.push(`O‘yin tugadi! G‘olib: ${activePlayers[0]?.name || 'Noma’lum'}!`);
-      return broadcastRoom(code);
-    }
-
-    let nextIdx = (room.turnIndex + 1) % room.players.length;
-    while (room.players[nextIdx].bankrupt) {
-      nextIdx = (nextIdx + 1) % room.players.length;
-    }
-
-    room.turnIndex = nextIdx;
-    room.hasRolled = false;
-    room.logs.push(`Navbat: ${room.players[nextIdx].name}.`);
+    if (!current || current.id !== playerId || current.money < 0) return;
+    advanceTurn(room);
     broadcastRoom(code);
   });
 
-  // 9. Отправка предложения обмена
+  // 13. Торговля (включая обнуление долга кредитором)
   socket.on('send_trade', ({ code, trade }) => {
     const room = rooms.get(code);
     if (!room) return;
     const sender = room.players.find((p) => p.id === trade.fromId);
     room.pendingTrade = trade;
-    room.logs.push(`${sender?.name || 'O‘yinchi'} savdo taklifini yubordi.`);
+    if (sender) {
+      addLog(room, [playerSeg(sender), { text: ' savdo taklifini yubordi.' }]);
+    }
     broadcastRoom(code);
   });
 
-  // 10. Ответ на предложение обмена
   socket.on('respond_trade', ({ code, playerId, accept }) => {
     const room = rooms.get(code);
     const trade = room?.pendingTrade;
@@ -339,12 +578,26 @@ io.on('connection', (socket) => {
 
     if (!accept || !fromP || !toP) {
       room.pendingTrade = null;
-      room.logs.push(`${toP?.name || 'O‘yinchi'} savdo taklifini rad etdi.`);
+      if (toP) addLog(room, [playerSeg(toP), { text: ' savdo taklifini rad etdi.' }]);
       return broadcastRoom(code);
     }
 
     fromP.money = fromP.money - trade.offerMoney + trade.requestMoney;
     toP.money = toP.money + trade.offerMoney - trade.requestMoney;
+
+    // Если кредитор обнулил долг должника в рамках сделки
+    if (trade.forgiveDebt) {
+      if (toP.money < 0 && toP.owedToId === fromP.id) {
+        toP.money = 0;
+        toP.owedToId = null;
+      } else if (fromP.money < 0 && fromP.owedToId === toP.id) {
+        fromP.money = 0;
+        fromP.owedToId = null;
+      }
+    }
+
+    if (fromP.money >= 0) fromP.owedToId = null;
+    if (toP.money >= 0) toP.owedToId = null;
 
     if (trade.offerJailCard && fromP.jailFreeCards > 0) {
       fromP.jailFreeCards -= 1;
@@ -363,12 +616,16 @@ io.on('connection', (socket) => {
     });
 
     room.pendingTrade = null;
-    room.logs.push(`${fromP.name} va ${toP.name} o‘rtasida almashinuv amalga oshdi!`);
+    addLog(room, [
+      playerSeg(fromP),
+      { text: ' va ' },
+      playerSeg(toP),
+      { text: ' o‘rtasida almashinuv amalga oshdi!' },
+    ]);
     broadcastRoom(code);
   });
 });
 
-// Раздача собранного React-приложения (для Render.com)
 const distPath = path.join(__dirname, 'dist');
 app.use(express.static(distPath));
 app.get('/{*splat}', (req, res) => {
@@ -379,5 +636,3 @@ const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
   console.log(`UzMonopoly server running on port ${PORT}`);
 });
-
-
