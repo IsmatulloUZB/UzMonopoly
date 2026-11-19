@@ -1,0 +1,43 @@
+{
+  "startingMoney": 1500,
+  "passGoReward": 200,
+  "jailFine": 50,
+  "maxPlayers": 6,
+  "playerColors": [
+    { "name": "Qizil", "hex": "#ef4444" },
+    { "name": "Ko‘k", "hex": "#3b82f6" },
+    { "name": "Yashil", "hex": "#10b981" },
+    { "name": "Sariq", "hex": "#f59e0b" },
+    { "name": "Binafsha", "hex": "#a855f7" },
+    { "name": "Pushti", "hex": "#ec4899" }
+  ],
+  "tiles": [
+    { "id": 0, "name": "START", "type": "go", "subtext": "+200$" },
+    { "id": 1, "name": "Termiz", "type": "city", "group": "#92400e", "price": 60, "rent": 10, "houseCost": 50 },
+    { "id": 2, "name": "Omad", "type": "chance", "subtext": "?" },
+    { "id": 3, "name": "Qarshi", "type": "city", "group": "#92400e", "price": 80, "rent": 14, "houseCost": 50 },
+    { "id": 4, "name": "Soliq", "type": "tax", "amount": 100, "subtext": "-100$" },
+    { "id": 5, "name": "Nukus", "type": "city", "group": "#0284c7", "price": 100, "rent": 18, "houseCost": 50 },
+    { "id": 6, "name": "Qamoqxona", "type": "jail", "subtext": "Tashrif" },
+
+    { "id": 7, "name": "Urganch", "type": "city", "group": "#0284c7", "price": 120, "rent": 22, "houseCost": 50 },
+    { "id": 8, "name": "Xiva", "type": "city", "group": "#db2777", "price": 140, "rent": 26, "houseCost": 100 },
+    { "id": 9, "name": "Afrosiyob", "type": "station", "price": 150, "rent": 35 },
+    { "id": 10, "name": "Navoiy", "type": "city", "group": "#db2777", "price": 160, "rent": 30, "houseCost": 100 },
+    { "id": 11, "name": "Buxoro", "type": "city", "group": "#ea580c", "price": 180, "rent": 34, "houseCost": 100 },
+
+    { "id": 12, "name": "Bepul Dam", "type": "parking", "subtext": "Dam olish" },
+    { "id": 13, "name": "Jizzax", "type": "city", "group": "#ea580c", "price": 200, "rent": 38, "houseCost": 100 },
+    { "id": 14, "name": "Omad", "type": "chance", "subtext": "?" },
+    { "id": 15, "name": "Guliston", "type": "city", "group": "#dc2626", "price": 220, "rent": 42, "houseCost": 150 },
+    { "id": 16, "name": "Qo‘qon", "type": "city", "group": "#dc2626", "price": 240, "rent": 46, "houseCost": 150 },
+    { "id": 17, "name": "Bojxona", "type": "tax", "amount": 150, "subtext": "-150$" },
+    { "id": 18, "name": "Qamoqqa!", "type": "gotojail", "subtext": "Politsiya" },
+
+    { "id": 19, "name": "Farg‘ona", "type": "city", "group": "#ca8a04", "price": 260, "rent": 50, "houseCost": 150 },
+    { "id": 20, "name": "Namangan", "type": "city", "group": "#ca8a04", "price": 280, "rent": 55, "houseCost": 150 },
+    { "id": 21, "name": "Andijon", "type": "city", "group": "#16a34a", "price": 300, "rent": 60, "houseCost": 200 },
+    { "id": 22, "name": "Samarqand", "type": "city", "group": "#16a34a", "price": 350, "rent": 70, "houseCost": 200 },
+    { "id": 23, "name": "Toshkent", "type": "city", "group": "#2563eb", "price": 400, "rent": 85, "houseCost": 200 }
+  ]
+}
