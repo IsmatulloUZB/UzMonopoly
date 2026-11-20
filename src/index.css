@@ -2,17 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
-@keyframes marquee-slide {
-  0%, 20% {
-    transform: translateX(0%);
+@keyframes float-money {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.75) translateY(8px);
   }
-  80%, 100% {
-    transform: translateX(-45%);
+  20% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.08) translateY(-2px);
+  }
+  80% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1) translateY(-10px);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.95) translateY(-18px);
   }
 }
 
-.animate-marquee {
-  display: inline-block;
-  white-space: nowrap;
-  animation: marquee-slide 5s linear infinite alternate;
+.animate-float-money {
+  animation: float-money 2.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.vertical-text-left {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+
+.vertical-text-right {
+  writing-mode: vertical-rl;
 }

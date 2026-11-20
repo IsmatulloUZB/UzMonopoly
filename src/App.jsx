@@ -20,6 +20,13 @@ import {
   X,
   Trash2,
   Trophy,
+  Plane,
+  Zap,
+  Droplets,
+  Palmtree,
+  HelpCircle,
+  Siren,
+  Flag,
 } from 'lucide-react';
 
 // ============================================================================
@@ -31,16 +38,11 @@ const MINI_APP_NAME = 'game';
 const SERVER_URL = import.meta.env.DEV ? 'http://localhost:3001' : undefined;
 const socket = io(SERVER_URL);
 
-const GRID_SIZE = BOARD_CONFIG.gridSize || 7;
+const GRID_SIZE = BOARD_CONFIG.gridSize || 11;
 
-// ============================================================================
-// СЛОВАРЬ ФЛАГОВ ДЛЯ СТРАН (circle-flags)
-// Если страны нет в словаре (и не указан tile.flag), иконка не отображается
-// ============================================================================
 const COUNTRY_FLAG_CODES = {
-  // Узбекистан и регионы
   "o'zbekiston": 'uz',
-  'ozbekiston': 'uz',
+  ozbekiston: 'uz',
   uzbekistan: 'uz',
   surxondaryo: 'uz',
   "qoraqalpog'iston": 'uz',
@@ -51,69 +53,39 @@ const COUNTRY_FLAG_CODES = {
   vodiy: 'uz',
   poytaxt: 'uz',
   toshkent: 'uz',
-  // Страны мира (на узбекском, русском и английском)
   braziliya: 'br',
   brazil: 'br',
-  бразилия: 'br',
+  isroil: 'il',
+  israel: 'il',
   turkiya: 'tr',
   turkey: 'tr',
-  турция: 'tr',
   rossiya: 'ru',
   russia: 'ru',
-  россия: 'ru',
   aqsh: 'us',
   usa: 'us',
-  сша: 'us',
   germaniya: 'de',
   germany: 'de',
-  германия: 'de',
   fransiya: 'fr',
   france: 'fr',
-  франция: 'fr',
   italiya: 'it',
   italy: 'it',
-  италия: 'it',
   ispaniya: 'es',
   spain: 'es',
-  испания: 'es',
   angliya: 'gb',
   britaniya: 'gb',
   uk: 'gb',
-  великобритания: 'gb',
   yaponiya: 'jp',
   japan: 'jp',
-  япония: 'jp',
   koreya: 'kr',
   korea: 'kr',
-  корея: 'kr',
   xitoy: 'cn',
   china: 'cn',
-  китай: 'cn',
   baa: 'ae',
   dubay: 'ae',
   uae: 'ae',
-  оаэ: 'ae',
   qozogiston: 'kz',
   "qozog'iston": 'kz',
   kazakhstan: 'kz',
-  казахстан: 'kz',
-  hindiston: 'in',
-  india: 'in',
-  индия: 'in',
-  kanada: 'ca',
-  canada: 'ca',
-  канада: 'ca',
-  avstraliya: 'au',
-  australia: 'au',
-  австралия: 'au',
-  shveytsariya: 'ch',
-  switzerland: 'ch',
-  швейцария: 'ch',
-  misr: 'eg',
-  egypt: 'eg',
-  египет: 'eg',
-  argentina: 'ar',
-  аргентина: 'ar',
 };
 
 const getCountryFlagUrl = (tile) => {
@@ -126,7 +98,7 @@ const getCountryFlagUrl = (tile) => {
   return code ? `https://kapowaz.github.io/circle-flags/flags/${code}.svg` : null;
 };
 
-// Координаты клеток в сетке NxN по часовой стрелке от левого верхнего угла
+// Координаты клеток в сетке NxN по часовой стрелке с верхнего левого угла
 const getTileGridPosition = (index) => {
   const side = GRID_SIZE - 1;
   if (index <= side) return { row: 1, col: index + 1 };
@@ -135,38 +107,86 @@ const getTileGridPosition = (index) => {
   return { row: GRID_SIZE - (index - side * 3), col: 1 };
 };
 
+// Координаты центра клетки с учётом пропорций Richup (углы 1.45fr, средние 1fr)
+const getRichupTileCenterPercent = (row, col) => {
+  const corner = 1.45;
+  const midCount = Math.max(0, GRID_SIZE - 2);
+  const total = corner * 2 + midCount * 1;
+
+  const getAxisCenter = (pos) => {
+    if (pos === 1) return ((corner / 2) / total) * 100;
+    if (pos === GRID_SIZE) return ((corner + midCount + corner / 2) / total) * 100;
+    return ((corner + (pos - 2) + 0.5) / total) * 100;
+  };
+
+  return {
+    top: getAxisCenter(row),
+    left: getAxisCenter(col),
+  };
+};
+
+// Координаты всплывающего изменения денег в пустой внутренней области стола
+const getFloatingMoneyPosition = (tileId) => {
+  const { row, col } = getTileGridPosition(tileId);
+  const { top, left } = getRichupTileCenterPercent(row, col);
+
+  // Угловые клетки -> смещаем по диагонали в пустое пространство угла
+  if (row === 1 && col === 1) return { top: 18, left: 18 }; // START (между New York и Salvador)
+  if (row === 1 && col === GRID_SIZE) return { top: 18, left: 82 }; // Jail
+  if (row === GRID_SIZE && col === GRID_SIZE) return { top: 82, left: 82 }; // Vacation
+  if (row === GRID_SIZE && col === 1) return { top: 82, left: 18 }; // Gotojail
+
+  // Стороны -> смещаем внутрь стола напротив клетки
+  if (row === 1) return { top: 18, left };
+  if (row === GRID_SIZE) return { top: 82, left };
+  if (col === 1) return { top, left: 19 };
+  if (col === GRID_SIZE) return { top, left: 81 };
+
+  return { top: 50, left: 50 };
+};
+
 // Позиционирование круглой иконки флага на внутреннем крае клетки (наполовину выступает к центру)
 const getFlagEdgePlacement = (row, col) => {
-  // Угловые клетки не являются городами, но на случай расширения проверяем стороны
   if (row === 1 && col > 1 && col < GRID_SIZE) {
-    // Верхний ряд -> нижний край (выступает вниз к центру)
-    return {
-      posClass: 'bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2',
-      paddingFix: 'pb-1.5',
-    };
+    return 'bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2';
   }
   if (row === GRID_SIZE && col > 1 && col < GRID_SIZE) {
-    // Нижний ряд -> верхний край (выступает вверх к центру)
-    return {
-      posClass: 'top-0 left-1/2 -translate-x-1/2 -translate-y-1/2',
-      paddingFix: 'pt-1.5',
-    };
+    return 'top-0 left-1/2 -translate-x-1/2 -translate-y-1/2';
   }
   if (col === 1 && row > 1 && row < GRID_SIZE) {
-    // Левый столбец -> правый край (выступает вправо к центру)
-    return {
-      posClass: 'right-0 top-1/2 translate-x-1/2 -translate-y-1/2',
-      paddingFix: 'pr-1.5',
-    };
+    return 'right-0 top-1/2 translate-x-1/2 -translate-y-1/2';
   }
   if (col === GRID_SIZE && row > 1 && row < GRID_SIZE) {
-    // Правый столбец -> левый край (выступает влево к центру)
-    return {
-      posClass: 'left-0 top-1/2 -translate-x-1/2 -translate-y-1/2',
-      paddingFix: 'pl-1.5',
-    };
+    return 'left-0 top-1/2 -translate-x-1/2 -translate-y-1/2';
   }
-  return { posClass: 'top-0 left-1/2 -translate-x-1/2 -translate-y-1/2', paddingFix: '' };
+  return 'top-0 left-1/2 -translate-x-1/2 -translate-y-1/2';
+};
+
+// Иконка для спецклеток (Start, Удача, Тюрьма, В тюрьму, Отдых)
+const renderSpecialTileIcon = (tile) => {
+  const iconClass = 'w-4 h-4 sm:w-6 sm:h-6';
+  if (tile.type === 'start') {
+    return <Flag className={`${iconClass} text-emerald-400`} />;
+  }
+  if (tile.type === 'chance') {
+    return <HelpCircle className={`${iconClass} text-pink-400`} />;
+  }
+  if (tile.type === 'jail') {
+    return (
+      <div className="flex items-center justify-center gap-[2px] w-4 h-4 sm:w-6 sm:h-6 border border-slate-400 rounded-sm px-0.5 bg-slate-800">
+        <span className="w-[1.5px] h-full bg-slate-300" />
+        <span className="w-[1.5px] h-full bg-slate-300" />
+        <span className="w-[1.5px] h-full bg-slate-300" />
+      </div>
+    );
+  }
+  if (tile.type === 'gotojail') {
+    return <Siren className={`${iconClass} text-rose-400`} />;
+  }
+  if (tile.type === 'parking') {
+    return <Palmtree className={`${iconClass} text-amber-400`} />;
+  }
+  return null;
 };
 
 export default function App() {
@@ -191,6 +211,7 @@ export default function App() {
   const inputRefs = useRef([]);
 
   const [selectedTile, setSelectedTile] = useState(null);
+  const [floatingEffects, setFloatingEffects] = useState([]);
 
   // Состояние торговли
   const [tradeModalOpen, setTradeModalOpen] = useState(false);
@@ -240,12 +261,20 @@ export default function App() {
         setErrorMsg('Siz xona egasi tomonidan o‘yindan chetlatildingiz.');
       }
     };
+    const handleMoneyEffect = (effect) => {
+      setFloatingEffects((prev) => [...prev, effect]);
+      setTimeout(() => {
+        setFloatingEffects((prev) => prev.filter((item) => item.id !== effect.id));
+      }, 2200);
+    };
 
     socket.on('room_update', handleRoomUpdate);
     socket.on('player_kicked', handleKicked);
+    socket.on('money_effect', handleMoneyEffect);
     return () => {
       socket.off('room_update', handleRoomUpdate);
       socket.off('player_kicked', handleKicked);
+      socket.off('money_effect', handleMoneyEffect);
     };
   }, [playerId]);
 
@@ -331,7 +360,6 @@ export default function App() {
     setTimeout(() => setCopiedType(null), 2000);
   };
 
-  // Проверка наличия домов в стране (группе) города
   const hasHousesInCountry = (tile) => {
     if (!tile || tile.type !== 'city' || !tile.group || !roomData) return false;
     return BOARD_CONFIG.tiles.some(
@@ -616,7 +644,7 @@ export default function App() {
   }
 
   // ============================================================================
-  // ЭКРАН 3: ИГРОВОЕ ПОЛЕ
+  // ЭКРАН 3: ИГРОВОЕ ПОЛЕ (стиль Richup.io)
   // ============================================================================
   const currentPlayer = roomData.players[roomData.turnIndex];
   const me = roomData.players.find((p) => p.id === playerId);
@@ -624,8 +652,10 @@ export default function App() {
   const isMyTurn = currentPlayer?.id === playerId && roomData.status === 'playing' && !me?.bankrupt;
   const currentTile = me ? BOARD_CONFIG.tiles[me.position] : null;
 
+  // Купить клетку можно ТОЛЬКО после броска кубиков в текущий ход (roomData.hasRolled === true)
   const canBuyCurrent =
     isMyTurn &&
+    roomData.hasRolled &&
     me.money >= 0 &&
     currentTile &&
     currentTile.type !== 'parking' &&
@@ -643,111 +673,194 @@ export default function App() {
     roomData.players.find((p) => p.id === roomData.winnerId) ||
     roomData.players.find((p) => !p.bankrupt);
 
-  // Адаптивный размер круглой иконки флага под любой GRID_SIZE (7x7 .. 13x13+)
-  const flagPixelSize = `clamp(11px, calc(15vw / ${GRID_SIZE}), 22px)`;
+  const flagPixelSize = `clamp(12px, calc(16vw / ${GRID_SIZE}), 22px)`;
+
+  // Пропорции сетки Richup: углы 1.45fr, средние клетки 1fr
+  const richupGridTemplate = `1.45fr repeat(${Math.max(0, GRID_SIZE - 2)}, minmax(0, 1fr)) 1.45fr`;
 
   return (
-    <div className="min-h-screen bg-[#0b1120] text-slate-100 flex flex-col lg:flex-row p-2 sm:p-4 gap-4">
-      {/* ЛЕВАЯ ЧАСТЬ: ИГРОВАЯ ДОСКА NxN */}
-      <div className="flex-1 flex items-center justify-center">
-        <div className="relative w-full max-w-[85vh] aspect-square bg-[#111827] border-2 border-slate-700 rounded-2xl p-1.5 sm:p-2 shadow-2xl">
+    <div className="min-h-screen bg-[#0b1120] text-slate-100 flex flex-col lg:flex-row p-0 sm:p-3 gap-2 sm:gap-4">
+      {/* ЛЕВАЯ ЧАСТЬ: ИГРОВАЯ ДОСКА НА ВСЮ ШИРИНУ ЭКРАНА */}
+      <div className="w-full lg:flex-1 flex items-center justify-center">
+        <div className="relative w-full max-w-[100vw] lg:max-w-[88vh] aspect-square bg-[#111827] border-y sm:border-2 border-slate-700 sm:rounded-2xl p-[2px] sm:p-1.5 shadow-2xl">
           <div
-            className="w-full h-full grid gap-1"
+            className="w-full h-full grid gap-[1.5px] sm:gap-1"
             style={{
-              gridTemplateColumns: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
-              gridTemplateRows: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
+              gridTemplateColumns: richupGridTemplate,
+              gridTemplateRows: richupGridTemplate,
             }}
           >
             {BOARD_CONFIG.tiles.map((tile) => {
               const { row, col } = getTileGridPosition(tile.id);
               const prop = roomData.properties?.[tile.id];
               const owner = prop ? roomData.players.find((p) => p.id === prop.ownerId) : null;
-              const isClickable = tile.type === 'city' || tile.type === 'station' || tile.type === 'company';
+              const isClickable =
+                tile.type === 'city' || tile.type === 'station' || tile.type === 'company';
               const flagUrl = tile.type === 'city' ? getCountryFlagUrl(tile) : null;
               const edgePlacement = getFlagEdgePlacement(row, col);
+
+              const isCorner =
+                (row === 1 || row === GRID_SIZE) && (col === 1 || col === GRID_SIZE);
+              const isTopRow = row === 1 && !isCorner;
+              const isBottomRow = row === GRID_SIZE && !isCorner;
+              const isLeftCol = col === 1 && !isCorner;
+              const isRightCol = col === GRID_SIZE && !isCorner;
+
+              const isIconOnlyTile =
+                tile.type === 'start' ||
+                tile.type === 'chance' ||
+                tile.type === 'jail' ||
+                tile.type === 'gotojail';
+
+              // Вспомогательная иконка для аэропортов / компаний / налогов / отдыха
+              const renderTileBadgeIcon = () => {
+                if (tile.type === 'station')
+                  return <Plane className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5 text-sky-300 shrink-0" />;
+                if (tile.type === 'company') {
+                  return tile.name.toLowerCase().includes('water') ? (
+                    <Droplets className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5 text-cyan-300 shrink-0" />
+                  ) : (
+                    <Zap className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5 text-amber-300 shrink-0" />
+                  );
+                }
+                if (tile.type === 'parking')
+                  return <Palmtree className="w-3.5 h-3.5 sm:w-5 sm:h-5 text-amber-400 shrink-0" />;
+                return null;
+              };
+
+              const priceLabel = tile.price
+                ? `${tile.price}$`
+                : tile.type === 'tax_percent'
+                ? `%${tile.percent}`
+                : tile.type === 'tax'
+                ? `$${tile.amount}`
+                : null;
 
               return (
                 <div
                   key={tile.id}
                   onClick={() => isClickable && setSelectedTile(tile)}
-                  style={{
-                    gridRow: row,
-                    gridColumn: col,
-                  }}
+                  style={{ gridRow: row, gridColumn: col }}
                   className={`relative select-none ${isClickable ? 'cursor-pointer group' : ''}`}
                 >
-                  {/* Внутренняя карточка клетки */}
                   <div
                     style={{
-                      borderColor: owner ? owner.color : '#334155',
-                      backgroundColor: owner ? `${owner.color}22` : '#1e293b',
+                      borderColor: owner ? owner.color : '#2a3548',
+                      backgroundColor: owner ? `${owner.color}2e` : '#1a2234',
                     }}
-                    className={`w-full h-full border-2 rounded-lg flex flex-col justify-between overflow-hidden p-0.5 sm:p-1 transition-colors group-hover:brightness-110 ${
-                      flagUrl ? edgePlacement.paddingFix : ''
+                    className={`w-full h-full border rounded-[4px] sm:rounded-lg flex overflow-hidden transition-colors group-hover:brightness-110 ${
+                      isTopRow
+                        ? 'flex-col justify-between items-center pb-1.5 sm:pb-2.5'
+                        : isBottomRow
+                        ? 'flex-col-reverse justify-between items-center pt-1.5 sm:pt-2.5'
+                        : isLeftCol
+                        ? 'flex-row justify-between items-center pr-1.5 sm:pr-2.5'
+                        : isRightCol
+                        ? 'flex-row-reverse justify-between items-center pl-1.5 sm:pl-2.5'
+                        : 'flex-col items-center justify-center p-0.5'
                     }`}
                   >
-                    {tile.group ? (
-                      <div
-                        className="h-1.5 sm:h-2 w-full rounded-sm flex items-center justify-center gap-0.5 shrink-0"
-                        style={{ backgroundColor: tile.group }}
-                      >
-                        {Array.from({ length: prop?.houses || 0 }).map((_, i) => (
-                          <span key={i} className="w-1.5 h-1.5 bg-white rounded-full" />
-                        ))}
+                    {/* 1. УГЛОВЫЕ И СПЕЦИАЛЬНЫЕ КЛЕТКИ БЕЗ ТЕКСТА (Start, Omad, Jail, Gotojail) */}
+                    {isIconOnlyTile ? (
+                      <div className="w-full h-full flex items-center justify-center">
+                        {renderSpecialTileIcon(tile)}
                       </div>
-                    ) : (
-                      <div className="h-0.5 shrink-0" />
-                    )}
-
-                    {/* Название клетки и цена */}
-                    <div className="text-center leading-tight my-auto px-0.5 overflow-hidden">
-                      <div className="overflow-hidden w-full">
-                        <span
-                          className={`text-[9px] sm:text-[11px] font-bold text-slate-100 ${
-                            tile.name.length > 7 ? 'animate-marquee sm:animate-none' : ''
-                          }`}
-                        >
+                    ) : isCorner ? (
+                      /* Угол Vacation (Dam olish) */
+                      <div className="w-full h-full flex flex-col items-center justify-center gap-0.5">
+                        {renderTileBadgeIcon()}
+                        <span className="text-[6px] sm:text-[9px] font-bold text-slate-300 leading-none">
                           {tile.name}
                         </span>
                       </div>
-                      {tile.price && (
-                        <div className="text-[8px] sm:text-[10px] font-mono text-emerald-400 leading-tight">
-                          {tile.price}$
-                        </div>
-                      )}
-                      {tile.subtext && (
-                        <div className="text-[8px] sm:text-[10px] text-slate-400 leading-tight">
-                          {tile.subtext}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Ник владельца (исправлена высота и отступы, чтобы низ букв не обрезался) */}
-                    <div className="min-h-[14px] flex items-center justify-center overflow-hidden shrink-0">
-                      {owner && (
+                    ) : isTopRow || isBottomRow ? (
+                      /* 2. ВЕРХНИЙ И НИЖНИЙ РЯДЫ (горизонтальный текст + плашка цены на внешнем крае) */
+                      <>
                         <div
-                          className="w-full overflow-hidden rounded px-1 py-[1px] text-center leading-none"
-                          style={{ backgroundColor: owner.color }}
+                          style={{ backgroundColor: tile.group || '#263147' }}
+                          className="w-full py-[1px] sm:py-0.5 px-0.5 flex items-center justify-center gap-0.5 shrink-0"
                         >
-                          <span
-                            className={`block text-[8px] sm:text-[9px] font-bold text-white leading-tight ${
-                              owner.name.length > 7 ? 'animate-marquee sm:animate-none' : ''
+                          {priceLabel ? (
+                            <span className="text-[6.5px] sm:text-[9px] font-mono font-bold text-white leading-none">
+                              {priceLabel}
+                            </span>
+                          ) : (
+                            <span className="h-[7px] sm:h-[9px]" />
+                          )}
+                          {Array.from({ length: prop?.houses || 0 }).map((_, i) => (
+                            <span key={i} className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-white rounded-full" />
+                          ))}
+                        </div>
+
+                        <div className="flex-1 w-full flex flex-col items-center justify-center px-[1px] overflow-hidden">
+                          {renderTileBadgeIcon()}
+                          <span className="w-full text-center text-[6.5px] sm:text-[10px] font-semibold text-slate-100 leading-[1.05] truncate">
+                            {tile.name}
+                          </span>
+                          {owner && (
+                            <span
+                              style={{ backgroundColor: owner.color }}
+                              className="mt-[1px] max-w-full px-0.5 rounded-[2px] text-[5.5px] sm:text-[8px] font-bold text-white leading-tight truncate"
+                            >
+                              {owner.name}
+                            </span>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      /* 3. ЛЕВЫЙ И ПРАВЫЙ СТОЛБЦЫ (вертикальный текст как в Richup!) */
+                      <>
+                        <div
+                          style={{ backgroundColor: tile.group || '#263147' }}
+                          className="h-full px-[1px] sm:px-0.5 py-0.5 flex flex-col items-center justify-center gap-0.5 shrink-0"
+                        >
+                          {priceLabel ? (
+                            <span
+                              className={`text-[6.5px] sm:text-[9px] font-mono font-bold text-white leading-none ${
+                                isLeftCol ? 'vertical-text-left' : 'vertical-text-right'
+                              }`}
+                            >
+                              {priceLabel}
+                            </span>
+                          ) : (
+                            <span className="w-[7px] sm:w-[9px]" />
+                          )}
+                          {Array.from({ length: prop?.houses || 0 }).map((_, i) => (
+                            <span key={i} className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-white rounded-full" />
+                          ))}
+                        </div>
+
+                        <div className="flex-1 h-full flex items-center justify-center py-[1px] overflow-hidden">
+                          <div
+                            className={`flex items-center justify-center gap-0.5 max-h-full overflow-hidden ${
+                              isLeftCol ? 'vertical-text-left' : 'vertical-text-right'
                             }`}
                           >
-                            {owner.name}
-                          </span>
+                            {renderTileBadgeIcon()}
+                            <span className="text-[6.5px] sm:text-[10px] font-semibold text-slate-100 leading-none truncate">
+                              {tile.name}
+                            </span>
+                            {owner && (
+                              <span
+                                style={{ backgroundColor: owner.color }}
+                                className="px-0.5 rounded-[2px] text-[5.5px] sm:text-[8px] font-bold text-white leading-none truncate"
+                              >
+                                {owner.name}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      )}
-                    </div>
+                      </>
+                    )}
                   </div>
 
-                  {/* Круглая иконка флага на внутреннем крае клетки (наполовину выступает к центру) */}
+                  {/* Круглая иконка флага на внутреннем крае клетки */}
                   {flagUrl && (
                     <img
                       src={flagUrl}
                       alt={tile.country || ''}
                       style={{ width: flagPixelSize, height: flagPixelSize }}
-                      className={`pointer-events-none absolute z-10 rounded-full ring-1 ring-slate-900 shadow-md object-cover ${edgePlacement.posClass}`}
+                      className={`pointer-events-none absolute z-10 rounded-full ring-1 ring-slate-950 shadow object-cover ${edgePlacement}`}
                     />
                   )}
                 </div>
@@ -762,28 +875,28 @@ export default function App() {
                 gridRowStart: 2,
                 gridRowEnd: GRID_SIZE,
               }}
-              className="bg-[#0f172a]/90 border border-slate-800 rounded-xl flex flex-col items-center justify-center p-3 text-center gap-2.5"
+              className="bg-[#0f172a]/90 border border-slate-800/80 rounded-lg sm:rounded-xl flex flex-col items-center justify-center p-2 sm:p-4 text-center gap-2"
             >
-              <div className="flex items-center gap-2">
-                <span className="text-lg sm:text-2xl font-extrabold tracking-tight bg-gradient-to-r from-emerald-400 to-sky-400 bg-clip-text text-transparent">
+              <div className="flex items-center gap-1.5">
+                <span className="text-base sm:text-2xl font-extrabold tracking-tight bg-gradient-to-r from-emerald-400 to-sky-400 bg-clip-text text-transparent">
                   UzMonopoly
                 </span>
-                <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">
+                <span className="text-[9px] sm:text-[10px] font-mono px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">
                   #{activeRoomCode}
                 </span>
               </div>
 
               {roomData.status === 'finished' ? (
-                <div className="flex flex-col items-center gap-3 py-2">
-                  <div className="flex items-center gap-2 text-amber-400 font-extrabold text-base sm:text-xl">
-                    <Trophy className="w-6 h-6" />
+                <div className="flex flex-col items-center gap-2.5 py-1">
+                  <div className="flex items-center gap-1.5 text-amber-400 font-extrabold text-sm sm:text-xl">
+                    <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
                     <span>O‘yin yakunlandi!</span>
                   </div>
                   {winnerPlayer && (
                     <div className="text-xs sm:text-sm text-slate-300">
                       G‘olib:{' '}
                       <span
-                        className="font-extrabold text-base sm:text-lg px-2 py-0.5 rounded-lg bg-slate-800"
+                        className="font-extrabold text-sm sm:text-lg px-2 py-0.5 rounded-lg bg-slate-800"
                         style={{ color: winnerPlayer.color }}
                       >
                         {winnerPlayer.name}
@@ -792,25 +905,25 @@ export default function App() {
                   )}
                   <button
                     onClick={leaveRoom}
-                    className="mt-1 px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-xs sm:text-sm font-bold rounded-xl flex items-center gap-2 shadow-lg transition"
+                    className="mt-1 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs sm:text-sm font-bold rounded-xl flex items-center gap-1.5 shadow-lg transition"
                   >
                     <LogOut className="w-4 h-4" /> Xonadan chiqish
                   </button>
                 </div>
               ) : (
                 <>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2.5">
                     {roomData.dice.map((val, idx) => (
                       <div
                         key={idx}
-                        className="w-10 h-10 sm:w-12 sm:h-12 bg-slate-800 border-2 border-slate-600 rounded-xl flex items-center justify-center text-lg sm:text-xl font-extrabold text-white shadow-inner"
+                        className="w-9 h-9 sm:w-12 sm:h-12 bg-slate-800 border-2 border-slate-600 rounded-xl flex items-center justify-center text-base sm:text-xl font-extrabold text-white shadow-inner"
                       >
                         {val}
                       </div>
                     ))}
                   </div>
 
-                  <div className="text-xs sm:text-sm text-slate-300">
+                  <div className="text-[11px] sm:text-sm text-slate-300">
                     Navbat:{' '}
                     <span className="font-bold" style={{ color: currentPlayer?.color }}>
                       {currentPlayer?.name}
@@ -818,17 +931,17 @@ export default function App() {
                   </div>
 
                   {isMyTurn && (
-                    <div className="flex flex-wrap items-center justify-center gap-2">
+                    <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2">
                       {me.money < 0 ? (
-                        <div className="text-[11px] text-rose-400 bg-rose-500/10 border border-rose-500/30 px-3 py-1.5 rounded-lg max-w-xs">
-                          Balansingiz manfiy ({me.money}$)! Tosh tashlash uchun mulk soting, savdo qiling yoki bankrot tugmasini bosing.
+                        <div className="text-[10px] sm:text-xs text-rose-400 bg-rose-500/10 border border-rose-500/30 px-2.5 py-1 rounded-lg max-w-[210px] sm:max-w-xs">
+                          Balansingiz manfiy ({me.money}$)! Mulk soting, savdo qiling yoki bankrot tugmasini bosing.
                         </div>
                       ) : (
                         <>
                           {!roomData.hasRolled && (
                             <button
                               onClick={rollDice}
-                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold rounded-xl flex items-center gap-1.5 shadow-lg transition"
+                              className="px-3.5 py-1.5 sm:px-4 sm:py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold rounded-xl flex items-center gap-1.5 shadow-lg transition"
                             >
                               <Dices className="w-4 h-4" /> Tosh tashlash
                             </button>
@@ -837,16 +950,16 @@ export default function App() {
                           {canBuyCurrent && (
                             <button
                               onClick={buyCurrentTile}
-                              className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl flex items-center gap-1 transition"
+                              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-[11px] sm:text-xs font-bold rounded-xl flex items-center gap-1 transition"
                             >
-                              <Coins className="w-4 h-4" /> Sotib olish ({currentTile.price}$)
+                              <Coins className="w-3.5 h-3.5" /> Sotib olish ({currentTile.price}$)
                             </button>
                           )}
 
                           {roomData.hasRolled && (
                             <button
                               onClick={endTurn}
-                              className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl transition"
+                              className="px-3.5 py-1.5 sm:px-4 sm:py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs sm:text-sm font-bold rounded-xl transition"
                             >
                               Navbatni berish
                             </button>
@@ -855,20 +968,20 @@ export default function App() {
                       )}
 
                       {me?.inJail && !roomData.hasRolled && (
-                        <div className="flex gap-1.5 w-full justify-center mt-1">
+                        <div className="flex gap-1.5 w-full justify-center mt-0.5">
                           <button
                             onClick={() => payBailOrUseCard(false)}
                             disabled={me.money < BOARD_CONFIG.jailFine}
-                            className="px-2.5 py-1 bg-rose-600/80 hover:bg-rose-600 disabled:opacity-40 text-[11px] font-semibold rounded-lg"
+                            className="px-2 py-1 bg-rose-600/80 hover:bg-rose-600 disabled:opacity-40 text-[10px] sm:text-[11px] font-semibold rounded-lg"
                           >
                             Jarima ({BOARD_CONFIG.jailFine}$)
                           </button>
                           {me.jailFreeCards > 0 && (
                             <button
                               onClick={() => payBailOrUseCard(true)}
-                              className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-[11px] font-semibold rounded-lg"
+                              className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-[10px] sm:text-[11px] font-semibold rounded-lg"
                             >
-                              Karta ishlatish ({me.jailFreeCards})
+                              Karta ({me.jailFreeCards})
                             </button>
                           )}
                         </div>
@@ -880,37 +993,58 @@ export default function App() {
             </div>
           </div>
 
-          {/* ФИШКИ ИГРОКОВ */}
-          <div className="pointer-events-none absolute inset-1.5 sm:inset-2 z-20">
+          {/* ФИШКИ ИГРОКОВ (с учётом сетки Richup) */}
+          <div className="pointer-events-none absolute inset-[2px] sm:inset-1.5 z-20">
             {roomData.players
               .filter((p) => !p.bankrupt)
               .map((p, idx) => {
                 const { row, col } = getTileGridPosition(p.position);
-                const cellSize = 100 / GRID_SIZE;
-                const offsetX = ((idx % 3) - 1) * 1.4;
-                const offsetY = (Math.floor(idx / 3) - 0.5) * 1.4;
+                const center = getRichupTileCenterPercent(row, col);
+                const offsetX = ((idx % 3) - 1) * 1.2;
+                const offsetY = (Math.floor(idx / 3) - 0.5) * 1.2;
 
                 return (
                   <div
                     key={p.id}
                     style={{
-                      top: `${(row - 0.5) * cellSize + offsetY}%`,
-                      left: `${(col - 0.5) * cellSize + offsetX}%`,
+                      top: `${center.top + offsetY}%`,
+                      left: `${center.left + offsetX}%`,
                       backgroundColor: p.color,
                     }}
                     title={p.name}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 rounded-full border-2 border-white shadow-lg transition-all duration-500 ease-out flex items-center justify-center text-[8px] font-bold text-white"
+                    className="absolute -translate-x-1/2 -translate-y-1/2 w-3.5 h-3.5 sm:w-5 sm:h-5 rounded-full border-[1.5px] sm:border-2 border-white shadow-lg transition-all duration-500 ease-out flex items-center justify-center text-[7px] sm:text-[9px] font-bold text-white"
                   >
                     {p.name[0]?.toUpperCase()}
                   </div>
                 );
               })}
           </div>
+
+          {/* ВСПЛЫВАЮЩИЕ ИЗМЕНЕНИЯ БАЛАНСА (+$200 / -$75) ВО ВНУТРЕННЕЙ ОБЛАСТИ СТОЛА */}
+          <div className="pointer-events-none absolute inset-0 z-30">
+            {floatingEffects.map((eff) => {
+              const pos = getFloatingMoneyPosition(eff.tileId);
+              const isPositive = eff.amount > 0;
+              return (
+                <div
+                  key={eff.id}
+                  style={{ top: `${pos.top}%`, left: `${pos.left}%` }}
+                  className={`absolute animate-float-money px-2 py-0.5 rounded-full font-mono font-extrabold text-xs sm:text-base shadow-lg border ${
+                    isPositive
+                      ? 'bg-emerald-950/90 border-emerald-400 text-emerald-300'
+                      : 'bg-rose-950/90 border-rose-400 text-rose-300'
+                  }`}
+                >
+                  {isPositive ? `+$${eff.amount}` : `-$${Math.abs(eff.amount)}`}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
       {/* ПРАВАЯ ПАНЕЛЬ */}
-      <div className="w-full lg:w-96 flex flex-col gap-3">
+      <div className="w-full lg:w-96 flex flex-col gap-3 p-2 sm:p-0">
         <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-3 space-y-2.5">
           <div className="flex items-center justify-between gap-2">
             <div>
@@ -997,6 +1131,11 @@ export default function App() {
                       Kuzatuvchi
                     </span>
                   )}
+                  {(p.skipTurns || 0) > 0 && !p.bankrupt && (
+                    <span className="text-[10px] px-1.5 bg-amber-500/20 text-amber-300 rounded">
+                      Dam olish
+                    </span>
+                  )}
                   {p.inJail && !p.bankrupt && (
                     <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                   )}
@@ -1079,11 +1218,17 @@ export default function App() {
           </div>
         )}
 
-        {/* Мои владения: постройка/удаление домов (50%) и продажа города (50%, если нет домов в стране) */}
+        {/* Мои владения (управление домами и продажей разрешено только в свой ход) */}
         <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-3 space-y-2">
-          <div className="text-xs font-bold uppercase text-slate-400 flex items-center gap-1.5">
-            <Building2 className="w-3.5 h-3.5" /> Mening mulklarim
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase text-slate-400 flex items-center gap-1.5">
+              <Building2 className="w-3.5 h-3.5" /> Mening mulklarim
+            </span>
+            {!isMyTurn && roomData.status === 'playing' && (
+              <span className="text-[10px] text-slate-500">Faqat o‘z navbatingizda</span>
+            )}
           </div>
+
           <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
             {Object.entries(roomData.properties || {})
               .filter(([, prop]) => prop.ownerId === playerId)
@@ -1098,9 +1243,29 @@ export default function App() {
                   tile.type === 'city' &&
                   countryCities.every((c) => roomData.properties[c.id]?.ownerId === playerId);
 
+                const countryHouseCounts = countryCities.map(
+                  (c) => roomData.properties[c.id]?.houses || 0
+                );
+                const minHousesInCountry =
+                  countryHouseCounts.length > 0 ? Math.min(...countryHouseCounts) : 0;
+                const maxHousesInCountry =
+                  countryHouseCounts.length > 0 ? Math.max(...countryHouseCounts) : 0;
+
                 const maxHouses = (tile.rents?.length || 1) - 1;
                 const housesCount = prop.houses || 0;
                 const countryHasHouses = hasHousesInCountry(tile);
+
+                const canBuildEvenly =
+                  isMyTurn &&
+                  hasFullCountry &&
+                  housesCount < maxHouses &&
+                  housesCount === minHousesInCountry &&
+                  (me?.money || 0) >= tile.houseCost;
+
+                const canSellHouseEvenly =
+                  isMyTurn && housesCount > 0 && housesCount === maxHousesInCountry;
+
+                const canSellProperty = isMyTurn && !countryHasHouses;
 
                 return (
                   <div
@@ -1122,50 +1287,60 @@ export default function App() {
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
-                      {/* Построить дом */}
                       {tile.type === 'city' && housesCount < maxHouses && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             buildHouse(tile.id);
                           }}
-                          disabled={!hasFullCountry || (me?.money || 0) < tile.houseCost}
+                          disabled={!canBuildEvenly}
                           title={
-                            !hasFullCountry
-                              ? 'Uy qurish uchun shu davlatning barcha shaharlarini yig‘ing'
+                            !isMyTurn
+                              ? 'Faqat o‘z navbatingizda qurish mumkin'
+                              : !hasFullCountry
+                              ? 'Avval shu davlatning barcha shaharlarini yig‘ing'
+                              : housesCount !== minHousesInCountry
+                              ? 'Uylarni barcha shaharlarda teng taqsimlab quring'
                               : `Uy qurish (-${tile.houseCost}$)`
                           }
-                          className="px-1.5 py-0.5 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-35 rounded text-[10px] font-semibold flex items-center gap-0.5"
+                          className="px-1.5 py-0.5 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-30 rounded text-[10px] font-semibold flex items-center gap-0.5"
                         >
                           <Home className="w-3 h-3" /> +{tile.houseCost}$
                         </button>
                       )}
 
-                      {/* Удалить дом (+50% стоимости) */}
                       {tile.type === 'city' && housesCount > 0 && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             sellHouse(tile.id);
                           }}
-                          title={`Uyni buzish (+${Math.floor(tile.houseCost / 2)}$)`}
-                          className="px-1.5 py-0.5 bg-amber-600/80 hover:bg-amber-600 rounded text-[10px] font-semibold"
+                          disabled={!canSellHouseEvenly}
+                          title={
+                            !isMyTurn
+                              ? 'Faqat o‘z navbatingizda sotish mumkin'
+                              : housesCount !== maxHousesInCountry
+                              ? 'Avval uylari eng ko‘p shahardan uyni soting'
+                              : `Uyni buzish (+${Math.floor(tile.houseCost / 2)}$)`
+                          }
+                          className="px-1.5 py-0.5 bg-amber-600/80 hover:bg-amber-600 disabled:opacity-30 rounded text-[10px] font-semibold"
                         >
                           -Uy (+{Math.floor(tile.houseCost / 2)}$)
                         </button>
                       )}
 
-                      {/* Удалить/продать город банку (+50% стоимости, если в стране нет домов) */}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           sellTile(tile.id);
                         }}
-                        disabled={countryHasHouses}
+                        disabled={!canSellProperty}
                         title={
-                          countryHasHouses
+                          !isMyTurn
+                            ? 'Faqat o‘z navbatingizda sotish mumkin'
+                            : countryHasHouses
                             ? 'Bu davlatda uy borligi sababli shaharni sotib bo‘lmaydi'
-                            : `Shaharni bankka sotish (+${Math.floor(tile.price / 2)}$)`
+                            : `Mulkni bankka sotish (+${Math.floor(tile.price / 2)}$)`
                         }
                         className="px-1.5 py-0.5 bg-rose-600/80 hover:bg-rose-600 disabled:opacity-30 rounded text-[10px] font-semibold flex items-center gap-0.5"
                       >
@@ -1297,7 +1472,7 @@ export default function App() {
         </div>
       )}
 
-      {/* МОДАЛЬНОЕ ОКНО ТОРГОВЛИ (нельзя выбрать города стран, где есть дома) */}
+      {/* МОДАЛЬНОЕ ОКНО ТОРГОВЛИ */}
       {tradeModalOpen && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
           <div className="w-full max-w-md bg-[#1e293b] border border-slate-700 rounded-2xl p-5 space-y-4 text-xs">
