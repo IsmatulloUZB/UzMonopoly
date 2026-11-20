@@ -345,7 +345,8 @@ io.on('connection', (socket) => {
       { text: ` tosh tashladi: ${d1} + ${d2} = ${steps}${isDouble ? ' (DUBL!)' : ''}.` },
     ]);
 
-    // Проверка тюрьмы
+    // Проверка тюрьмы: после любого броска в тюрьме (удачного или неудачного)
+    // игрок не шагает и не может бросать повторно — очередь сразу передаётся дальше
     if (p.inJail) {
       if (isDouble) {
         p.inJail = false;
@@ -356,21 +357,19 @@ io.on('connection', (socket) => {
         if (p.jailTurns >= 3) {
           p.inJail = false;
           p.jailTurns = 0;
-          room.hasRolled = true;
           addLog(room, [
             playerSeg(p),
-            { text: ' 3 ta urinishdan so‘ng qamoqdan ozod bo‘ldi (qamoq maydonida qoldi).' },
+            { text: ' 3 ta urinishdan so‘ng qamoqdan ozod bo‘ldi.' },
           ]);
-          return broadcastRoom(code);
         } else {
-          room.hasRolled = true;
           addLog(room, [
             playerSeg(p),
             { text: ` qamoqda qoldi (${p.jailTurns}/3 urinish).` },
           ]);
-          return broadcastRoom(code);
         }
       }
+      advanceTurn(room);
+      return broadcastRoom(code);
     }
 
     // Движение по часовой стрелке
@@ -652,7 +651,7 @@ io.on('connection', (socket) => {
     broadcastRoom(code);
   });
 
-  // 13. Выход из тюрьмы за штраф или карту
+  // 13. Выход из тюрьмы за штраф или карту (ход сразу передаётся дальше)
   socket.on('leave_jail', ({ code, playerId, useCard }) => {
     const room = rooms.get(code);
     if (!room) return;
@@ -664,6 +663,7 @@ io.on('connection', (socket) => {
       p.inJail = false;
       p.jailTurns = 0;
       addLog(room, [playerSeg(p), { text: ' maxsus karta bilan qamoqdan chiqdi!' }]);
+      advanceTurn(room);
       broadcastRoom(code);
     } else if (!useCard && p.money >= BOARD_CONFIG.jailFine) {
       p.money -= BOARD_CONFIG.jailFine;
@@ -674,6 +674,7 @@ io.on('connection', (socket) => {
         playerSeg(p),
         { text: ` ${BOARD_CONFIG.jailFine}$ jarima to‘lab qamoqdan chiqdi!` },
       ]);
+      advanceTurn(room);
       broadcastRoom(code);
     }
   });

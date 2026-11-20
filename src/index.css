@@ -25,6 +25,32 @@
   animation: float-money 2.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
+@keyframes marquee-x {
+  0%, 15% {
+    transform: translateX(0px);
+  }
+  85%, 100% {
+    transform: translateX(var(--marquee-offset, 0px));
+  }
+}
+
+@keyframes marquee-y {
+  0%, 15% {
+    transform: translateY(0px);
+  }
+  85%, 100% {
+    transform: translateY(var(--marquee-offset, 0px));
+  }
+}
+
+.animate-marquee-x {
+  animation: marquee-x 3.5s ease-in-out infinite alternate;
+}
+
+.animate-marquee-y {
+  animation: marquee-y 3.5s ease-in-out infinite alternate;
+}
+
 .vertical-text-left {
   writing-mode: vertical-rl;
   transform: rotate(180deg);

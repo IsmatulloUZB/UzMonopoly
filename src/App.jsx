@@ -130,13 +130,11 @@ const getFloatingMoneyPosition = (tileId) => {
   const { row, col } = getTileGridPosition(tileId);
   const { top, left } = getRichupTileCenterPercent(row, col);
 
-  // Угловые клетки -> смещаем по диагонали в пустое пространство угла
-  if (row === 1 && col === 1) return { top: 18, left: 18 }; // START (между New York и Salvador)
-  if (row === 1 && col === GRID_SIZE) return { top: 18, left: 82 }; // Jail
-  if (row === GRID_SIZE && col === GRID_SIZE) return { top: 82, left: 82 }; // Vacation
-  if (row === GRID_SIZE && col === 1) return { top: 82, left: 18 }; // Gotojail
+  if (row === 1 && col === 1) return { top: 18, left: 18 };
+  if (row === 1 && col === GRID_SIZE) return { top: 18, left: 82 };
+  if (row === GRID_SIZE && col === GRID_SIZE) return { top: 82, left: 82 };
+  if (row === GRID_SIZE && col === 1) return { top: 82, left: 18 };
 
-  // Стороны -> смещаем внутрь стола напротив клетки
   if (row === 1) return { top: 18, left };
   if (row === GRID_SIZE) return { top: 82, left };
   if (col === 1) return { top, left: 19 };
@@ -145,7 +143,7 @@ const getFloatingMoneyPosition = (tileId) => {
   return { top: 50, left: 50 };
 };
 
-// Позиционирование круглой иконки флага на внутреннем крае клетки (наполовину выступает к центру)
+// Позиционирование круглой иконки флага на внутреннем крае клетки
 const getFlagEdgePlacement = (row, col) => {
   if (row === 1 && col > 1 && col < GRID_SIZE) {
     return 'bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2';
@@ -161,6 +159,61 @@ const getFlagEdgePlacement = (row, col) => {
   }
   return 'top-0 left-1/2 -translate-x-1/2 -translate-y-1/2';
 };
+
+// Компонент плавной прокрутки текста туда-сюда, если он не помещается в блок
+function MarqueeText({ text, vertical = false, className = '', style = {} }) {
+  const containerRef = useRef(null);
+  const textRef = useRef(null);
+  const [offset, setOffset] = useState(0);
+
+  useEffect(() => {
+    const measure = () => {
+      const container = containerRef.current;
+      const textEl = textRef.current;
+      if (!container || !textEl) return;
+
+      const diff = vertical
+        ? textEl.offsetHeight - container.clientHeight
+        : textEl.offsetWidth - container.clientWidth;
+
+      setOffset(diff > 1 ? -Math.ceil(diff + 2) : 0);
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (containerRef.current) ro.observe(containerRef.current);
+    if (textRef.current) ro.observe(textRef.current);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [text, vertical]);
+
+  const isOverflowing = offset < 0;
+
+  return (
+    <span
+      ref={containerRef}
+      style={style}
+      className={`overflow-hidden whitespace-nowrap ${
+        vertical
+          ? `inline-flex max-h-full ${isOverflowing ? 'items-start' : 'items-center'}`
+          : `block max-w-full ${isOverflowing ? 'text-left' : 'text-center'}`
+      } ${className}`}
+    >
+      <span
+        ref={textRef}
+        style={isOverflowing ? { '--marquee-offset': `${offset}px` } : undefined}
+        className={`inline-block whitespace-nowrap ${
+          isOverflowing ? (vertical ? 'animate-marquee-y' : 'animate-marquee-x') : ''
+        }`}
+      >
+        {text}
+      </span>
+    </span>
+  );
+}
 
 // Иконка для спецклеток (Start, Удача, Тюрьма, В тюрьму, Отдых)
 const renderSpecialTileIcon = (tile) => {
@@ -209,6 +262,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [copiedType, setCopiedType] = useState(null);
   const inputRefs = useRef([]);
+  const logsContainerRef = useRef(null);
 
   const [selectedTile, setSelectedTile] = useState(null);
   const [floatingEffects, setFloatingEffects] = useState([]);
@@ -277,6 +331,13 @@ export default function App() {
       socket.off('money_effect', handleMoneyEffect);
     };
   }, [playerId]);
+
+  // Автоматическая прокрутка истории на самый верх при появлении новой записи
+  useEffect(() => {
+    if (logsContainerRef.current) {
+      logsContainerRef.current.scrollTop = 0;
+    }
+  }, [roomData?.logs?.length]);
 
   const handleCodeChange = (index, value) => {
     const clean = value.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -644,7 +705,7 @@ export default function App() {
   }
 
   // ============================================================================
-  // ЭКРАН 3: ИГРОВОЕ ПОЛЕ (стиль Richup.io)
+  // ЭКРАН 3: ИГРОВОЕ ПОЛЕ
   // ============================================================================
   const currentPlayer = roomData.players[roomData.turnIndex];
   const me = roomData.players.find((p) => p.id === playerId);
@@ -652,7 +713,6 @@ export default function App() {
   const isMyTurn = currentPlayer?.id === playerId && roomData.status === 'playing' && !me?.bankrupt;
   const currentTile = me ? BOARD_CONFIG.tiles[me.position] : null;
 
-  // Купить клетку можно ТОЛЬКО после броска кубиков в текущий ход (roomData.hasRolled === true)
   const canBuyCurrent =
     isMyTurn &&
     roomData.hasRolled &&
@@ -674,13 +734,11 @@ export default function App() {
     roomData.players.find((p) => !p.bankrupt);
 
   const flagPixelSize = `clamp(12px, calc(16vw / ${GRID_SIZE}), 22px)`;
-
-  // Пропорции сетки Richup: углы 1.45fr, средние клетки 1fr
   const richupGridTemplate = `1.45fr repeat(${Math.max(0, GRID_SIZE - 2)}, minmax(0, 1fr)) 1.45fr`;
 
   return (
     <div className="min-h-screen bg-[#0b1120] text-slate-100 flex flex-col lg:flex-row p-0 sm:p-3 gap-2 sm:gap-4">
-      {/* ЛЕВАЯ ЧАСТЬ: ИГРОВАЯ ДОСКА НА ВСЮ ШИРИНУ ЭКРАНА */}
+      {/* ЛЕВАЯ ЧАСТЬ: ИГРОВАЯ ДОСКА */}
       <div className="w-full lg:flex-1 flex items-center justify-center">
         <div className="relative w-full max-w-[100vw] lg:max-w-[88vh] aspect-square bg-[#111827] border-y sm:border-2 border-slate-700 sm:rounded-2xl p-[2px] sm:p-1.5 shadow-2xl">
           <div
@@ -712,7 +770,6 @@ export default function App() {
                 tile.type === 'jail' ||
                 tile.type === 'gotojail';
 
-              // Вспомогательная иконка для аэропортов / компаний / налогов / отдыха
               const renderTileBadgeIcon = () => {
                 if (tile.type === 'station')
                   return <Plane className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5 text-sky-300 shrink-0" />;
@@ -760,21 +817,21 @@ export default function App() {
                         : 'flex-col items-center justify-center p-0.5'
                     }`}
                   >
-                    {/* 1. УГЛОВЫЕ И СПЕЦИАЛЬНЫЕ КЛЕТКИ БЕЗ ТЕКСТА (Start, Omad, Jail, Gotojail) */}
+                    {/* 1. УГЛОВЫЕ И СПЕЦИАЛЬНЫЕ КЛЕТКИ БЕЗ ТЕКСТА */}
                     {isIconOnlyTile ? (
                       <div className="w-full h-full flex items-center justify-center">
                         {renderSpecialTileIcon(tile)}
                       </div>
                     ) : isCorner ? (
-                      /* Угол Vacation (Dam olish) */
                       <div className="w-full h-full flex flex-col items-center justify-center gap-0.5">
                         {renderTileBadgeIcon()}
-                        <span className="text-[6px] sm:text-[9px] font-bold text-slate-300 leading-none">
-                          {tile.name}
-                        </span>
+                        <MarqueeText
+                          text={tile.name}
+                          className="w-full text-[6px] sm:text-[9px] font-bold text-slate-300 leading-none"
+                        />
                       </div>
                     ) : isTopRow || isBottomRow ? (
-                      /* 2. ВЕРХНИЙ И НИЖНИЙ РЯДЫ (горизонтальный текст + плашка цены на внешнем крае) */
+                      /* 2. ВЕРХНИЙ И НИЖНИЙ РЯДЫ */
                       <>
                         <div
                           style={{ backgroundColor: tile.group || '#263147' }}
@@ -794,21 +851,21 @@ export default function App() {
 
                         <div className="flex-1 w-full flex flex-col items-center justify-center px-[1px] overflow-hidden">
                           {renderTileBadgeIcon()}
-                          <span className="w-full text-center text-[6.5px] sm:text-[10px] font-semibold text-slate-100 leading-[1.05] truncate">
-                            {tile.name}
-                          </span>
+                          <MarqueeText
+                            text={tile.name}
+                            className="w-full text-[6.5px] sm:text-[10px] font-semibold text-slate-100 leading-[1.05]"
+                          />
                           {owner && (
-                            <span
+                            <MarqueeText
+                              text={owner.name}
                               style={{ backgroundColor: owner.color }}
-                              className="mt-[1px] max-w-full px-0.5 rounded-[2px] text-[5.5px] sm:text-[8px] font-bold text-white leading-tight truncate"
-                            >
-                              {owner.name}
-                            </span>
+                              className="mt-[1px] w-full px-0.5 rounded-[2px] text-[5.5px] sm:text-[8px] font-bold text-white leading-tight"
+                            />
                           )}
                         </div>
                       </>
                     ) : (
-                      /* 3. ЛЕВЫЙ И ПРАВЫЙ СТОЛБЦЫ (вертикальный текст как в Richup!) */
+                      /* 3. ЛЕВЫЙ И ПРАВЫЙ СТОЛБЦЫ (вертикальная бегущая строка туда-сюда) */
                       <>
                         <div
                           style={{ backgroundColor: tile.group || '#263147' }}
@@ -837,16 +894,18 @@ export default function App() {
                             }`}
                           >
                             {renderTileBadgeIcon()}
-                            <span className="text-[6.5px] sm:text-[10px] font-semibold text-slate-100 leading-none truncate">
-                              {tile.name}
-                            </span>
+                            <MarqueeText
+                              text={tile.name}
+                              vertical
+                              className="text-[6.5px] sm:text-[10px] font-semibold text-slate-100 leading-none"
+                            />
                             {owner && (
-                              <span
+                              <MarqueeText
+                                text={owner.name}
+                                vertical
                                 style={{ backgroundColor: owner.color }}
-                                className="px-0.5 rounded-[2px] text-[5.5px] sm:text-[8px] font-bold text-white leading-none truncate"
-                              >
-                                {owner.name}
-                              </span>
+                                className="px-0.5 rounded-[2px] text-[5.5px] sm:text-[8px] font-bold text-white leading-none"
+                              />
                             )}
                           </div>
                         </div>
@@ -993,7 +1052,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* ФИШКИ ИГРОКОВ (с учётом сетки Richup) */}
+          {/* ФИШКИ ИГРОКОВ */}
           <div className="pointer-events-none absolute inset-[2px] sm:inset-1.5 z-20">
             {roomData.players
               .filter((p) => !p.bankrupt)
@@ -1020,7 +1079,7 @@ export default function App() {
               })}
           </div>
 
-          {/* ВСПЛЫВАЮЩИЕ ИЗМЕНЕНИЯ БАЛАНСА (+$200 / -$75) ВО ВНУТРЕННЕЙ ОБЛАСТИ СТОЛА */}
+          {/* ВСПЛЫВАЮЩИЕ ИЗМЕНЕНИЯ БАЛАНСА (+$200 / -$75) */}
           <div className="pointer-events-none absolute inset-0 z-30">
             {floatingEffects.map((eff) => {
               const pos = getFloatingMoneyPosition(eff.tileId);
@@ -1121,18 +1180,19 @@ export default function App() {
                     : 'bg-slate-900/60 border-slate-800'
                 } ${p.bankrupt ? 'opacity-50' : ''}`}
               >
-                <div className="flex items-center gap-2 truncate">
+                <div className="flex items-center gap-2 overflow-hidden flex-1 pr-2">
                   <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
-                  <span className={`font-semibold truncate ${p.bankrupt ? 'line-through' : ''}`}>
-                    {p.name}
-                  </span>
+                  <MarqueeText
+                    text={p.name}
+                    className={`font-semibold ${p.bankrupt ? 'line-through' : ''}`}
+                  />
                   {p.bankrupt && (
-                    <span className="text-[10px] px-1.5 bg-slate-800 text-slate-400 rounded">
+                    <span className="text-[10px] px-1.5 bg-slate-800 text-slate-400 rounded shrink-0">
                       Kuzatuvchi
                     </span>
                   )}
                   {(p.skipTurns || 0) > 0 && !p.bankrupt && (
-                    <span className="text-[10px] px-1.5 bg-amber-500/20 text-amber-300 rounded">
+                    <span className="text-[10px] px-1.5 bg-amber-500/20 text-amber-300 rounded shrink-0">
                       Dam olish
                     </span>
                   )}
@@ -1140,13 +1200,13 @@ export default function App() {
                     <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                   )}
                   {p.jailFreeCards > 0 && !p.bankrupt && (
-                    <span className="px-1.5 py-0.2 bg-indigo-500/20 text-indigo-300 rounded text-[10px]">
+                    <span className="px-1.5 py-0.2 bg-indigo-500/20 text-indigo-300 rounded text-[10px] shrink-0">
                       Karta x{p.jailFreeCards}
                     </span>
                   )}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <span
                     className={`font-mono font-bold ${
                       p.money < 0 ? 'text-rose-400' : 'text-emerald-400'
@@ -1218,7 +1278,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Мои владения (управление домами и продажей разрешено только в свой ход) */}
+        {/* Мои владения */}
         <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-3 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase text-slate-400 flex items-center gap-1.5">
@@ -1273,12 +1333,12 @@ export default function App() {
                     onClick={() => setSelectedTile(tile)}
                     className="flex items-center justify-between px-2.5 py-1.5 bg-slate-900 rounded-lg text-xs cursor-pointer hover:bg-slate-800 gap-1"
                   >
-                    <div className="flex items-center gap-1.5 truncate">
+                    <div className="flex items-center gap-1.5 overflow-hidden flex-1">
                       <span
                         className="w-2.5 h-2.5 rounded-sm shrink-0"
                         style={{ backgroundColor: tile.group || '#64748b' }}
                       />
-                      <span className="font-medium truncate">{tile.name}</span>
+                      <MarqueeText text={tile.name} className="font-medium" />
                       {tile.type === 'city' && (
                         <span className="text-[10px] text-slate-400 shrink-0">
                           ({housesCount}/{maxHouses})
@@ -1353,11 +1413,14 @@ export default function App() {
           </div>
         </div>
 
-        {/* История игры */}
+        {/* История игры (новые записи сверху, скролл автоматически держится наверху) */}
         <div className="flex-1 bg-[#1e293b] border border-slate-700 rounded-xl p-3 flex flex-col min-h-[150px]">
           <span className="text-xs font-bold uppercase text-slate-400 mb-1.5">O‘yin tarixi</span>
-          <div className="flex-1 max-h-48 overflow-y-auto flex flex-col-reverse gap-1 text-[11px] text-slate-300 pr-1">
-            {(roomData.logs || []).map((entry, idx) => (
+          <div
+            ref={logsContainerRef}
+            className="flex-1 max-h-48 overflow-y-auto flex flex-col gap-1 text-[11px] text-slate-300 pr-1"
+          >
+            {[...(roomData.logs || [])].reverse().map((entry, idx) => (
               <div key={entry.id || idx} className="border-b border-slate-800/80 pb-1">
                 {entry.segments ? (
                   entry.segments.map((seg, sIdx) => (
@@ -1559,7 +1622,7 @@ export default function App() {
                               )
                             }
                           />
-                          <span className="truncate">{t?.name}</span>
+                          <MarqueeText text={t?.name || ''} />
                         </label>
                       );
                     })}
@@ -1610,7 +1673,7 @@ export default function App() {
                               )
                             }
                           />
-                          <span className="truncate">{t?.name}</span>
+                          <MarqueeText text={t?.name || ''} />
                         </label>
                       );
                     })}
