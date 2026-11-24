@@ -535,10 +535,10 @@ io.on('connection', (socket) => {
     broadcastRoom(code);
   });
 
-  // 9. Покупка клетки (только после броска кубиков в текущий ход)
+  // 9. Покупка клетки (после обычного броска или после дубля в текущий ход)
   socket.on('buy_tile', ({ code, playerId }) => {
     const room = rooms.get(code);
-    if (!room || room.status !== 'playing' || !room.hasRolled) return;
+    if (!room || room.status !== 'playing' || (!room.hasRolled && (room.doublesCount || 0) === 0)) return;
     const p = room.players[room.turnIndex];
     if (!p || p.id !== playerId || p.money < 0) return;
 

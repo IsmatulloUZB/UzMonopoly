@@ -198,7 +198,7 @@ function MarqueeText({ text, vertical = false, className = '', style = {} }) {
       style={style}
       className={`overflow-hidden whitespace-nowrap ${
         vertical
-          ? `inline-flex max-h-full ${isOverflowing ? 'items-start' : 'items-center'}`
+          ? `inline-flex items-center max-h-full ${isOverflowing ? 'justify-start' : 'justify-center'}`
           : `block max-w-full ${isOverflowing ? 'text-left' : 'text-center'}`
       } ${className}`}
     >
@@ -910,19 +910,21 @@ export default function App() {
                           {(prop?.houses || 0) > 0 && <HouseBadge count={prop.houses} />}
                         </div>
 
-                        {/* Слева: [Город | Владелец]; Справа: [Владелец | Город] */}
+                        {/* Слева: [Иконка | Город | Владелец]; Справа: [Владелец | Город | Иконка] */}
                         <div
                           className={`flex-1 h-full flex items-center justify-center gap-[2px] py-[2px] px-[1px] overflow-hidden ${
                             isLeftCol ? 'flex-row' : 'flex-row-reverse'
                           }`}
                         >
-                          {/* Колонка названия города (на всю высоту клетки) */}
+                          {/* Отдельная иконка (самолёт / молния / капля) рядом с полосой цены */}
+                          {renderTileBadgeIcon()}
+
+                          {/* Колонка названия города (по центру на всю высоту клетки) */}
                           <div
                             className={`h-full flex items-center justify-center overflow-hidden ${
                               isLeftCol ? 'vertical-text-left' : 'vertical-text-right'
                             }`}
                           >
-                            {renderTileBadgeIcon()}
                             <MarqueeText
                               text={tile.name}
                               vertical
@@ -930,7 +932,7 @@ export default function App() {
                             />
                           </div>
 
-                          {/* Колонка имени владельца (на всю высоту клетки) */}
+                          {/* Колонка имени владельца */}
                           {owner && (
                             <div
                               className={`h-full flex items-center justify-center overflow-hidden ${
@@ -941,7 +943,7 @@ export default function App() {
                                 text={owner.name}
                                 vertical
                                 style={{ backgroundColor: owner.color }}
-                                className="h-full py-0.5 px-[1px] rounded-[2px] text-[5.5px] sm:text-[8px] font-bold text-white leading-none"
+                                className="max-h-full py-1 px-[1.5px] rounded-[2px] text-[5.5px] sm:text-[8px] font-bold text-white leading-none"
                               />
                             </div>
                           )}
