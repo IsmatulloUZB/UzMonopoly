@@ -241,6 +241,33 @@ const renderSpecialTileIcon = (tile) => {
   }
   return null;
 };
+const HOUSE_CUTOUT_PATHS = {
+  1: 'M12 1.5L1.5 10.5H4V22.5H20V10.5H22.5L12 1.5ZM11 9.5H13.5V20H11V12.5H9.2V10.8L11 9.5Z',
+  2: 'M12 1.5L1.5 10.5H4V22.5H20V10.5H22.5L12 1.5ZM8.5 9.5H15.5V15.6H10.7V18H15.5V20H8.5V13.6H13.3V11.5H8.5V9.5Z',
+  3: 'M12 1.5L1.5 10.5H4V22.5H20V10.5H22.5L12 1.5ZM8.5 9.5H15.5V20H8.5V18H13.3V15.7H9.5V13.7H13.3V11.5H8.5V9.5Z',
+  4: 'M12 1.5L1.5 10.5H4V22.5H20V10.5H22.5L12 1.5ZM8.5 9.5H10.7V13.7H13.3V9.5H15.5V20H13.3V15.7H8.5V9.5Z',
+  5: 'M12 1.5L1.5 10.5H4V22.5H20V10.5H22.5L12 1.5ZM8.5 9.5H15.5V11.5H10.7V13.6H15.5V20H8.5V18H13.3V15.6H8.5V9.5Z',
+};
+
+function HouseBadge({ count }) {
+  const level = Math.min(5, Math.max(1, Number(count) || 0));
+  if (!level) return null;
+
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5 shrink-0 drop-shadow-[0_1px_1px_rgba(0,0,0,0.65)]"
+      aria-label={`${level} uy`}
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        fill="#FACC15"
+        d={HOUSE_CUTOUT_PATHS[level]}
+      />
+    </svg>
+  );
+}
 
 export default function App() {
   const [playerId] = useState(() => {
@@ -844,9 +871,7 @@ export default function App() {
                           ) : (
                             <span className="h-[7px] sm:h-[9px]" />
                           )}
-                          {Array.from({ length: prop?.houses || 0 }).map((_, i) => (
-                            <span key={i} className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-white rounded-full" />
-                          ))}
+                          {(prop?.houses || 0) > 0 && <HouseBadge count={prop.houses} />}
                         </div>
 
                         <div className="flex-1 w-full flex flex-col items-center justify-center px-[1px] overflow-hidden">
@@ -882,9 +907,7 @@ export default function App() {
                           ) : (
                             <span className="w-[7px] sm:w-[9px]" />
                           )}
-                          {Array.from({ length: prop?.houses || 0 }).map((_, i) => (
-                            <span key={i} className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-white rounded-full" />
-                          ))}
+                          {(prop?.houses || 0) > 0 && <HouseBadge count={prop.houses} />}
                         </div>
 
                         {/* Слева: [Город | Владелец]; Справа: [Владелец | Город] */}
