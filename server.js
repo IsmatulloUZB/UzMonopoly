@@ -125,6 +125,7 @@ const advanceTurn = (room) => {
 
     room.turnIndex = nextIdx;
     room.hasRolled = false;
+    room.doublesCount = 0;
     addLog(room, [{ text: 'Navbat: ' }, playerSeg(candidate)]);
     return;
   }
@@ -345,8 +346,7 @@ io.on('connection', (socket) => {
       { text: ` tosh tashladi: ${d1} + ${d2} = ${steps}${isDouble ? ' (DUBL!)' : ''}.` },
     ]);
 
-    // Проверка тюрьмы: после любого броска в тюрьме (удачного или неудачного)
-    // игрок не шагает и не может бросать повторно — очередь сразу передаётся дальше
+    // 1. Если игрок в тюрьме — любой бросок (удачный или неудачный) завершает его ход
     if (p.inJail) {
       if (isDouble) {
         p.inJail = false;
@@ -372,7 +372,27 @@ io.on('connection', (socket) => {
       return broadcastRoom(code);
     }
 
-    // Движение по часовой стрелке
+    // 2. Проверка на 3 дубля подряд
+    if (isDouble) {
+      room.doublesCount = (room.doublesCount || 0) + 1;
+      if (room.doublesCount >= 3) {
+        const jailIdx = BOARD_CONFIG.tiles.findIndex((t) => t.type === 'jail');
+        p.position = jailIdx !== -1 ? jailIdx : 10;
+        p.inJail = true;
+        p.jailTurns = 0;
+        room.hasRolled = true;
+        room.doublesCount = 0;
+        addLog(room, [
+          playerSeg(p),
+          { text: ' ketma-ket 3 marta dubl tashlab qamoqqa tushdi!' },
+        ]);
+        return broadcastRoom(code);
+      }
+    } else {
+      room.doublesCount = 0;
+    }
+
+    // 3. Движение по часовой стрелке
     const oldPos = p.position;
     const totalTiles = BOARD_CONFIG.tiles.length;
     const newPos = (oldPos + steps) % totalTiles;
@@ -422,6 +442,7 @@ io.on('connection', (socket) => {
       p.position = jailIdx !== -1 ? jailIdx : 10;
       p.inJail = true;
       p.jailTurns = 0;
+      room.doublesCount = 0;
       addLog(room, [playerSeg(p), { text: ' qamoqxonaga jo‘natildi!' }]);
     } else if (landedTile.type === 'chance') {
       const events = [
@@ -509,18 +530,8 @@ io.on('connection', (socket) => {
       ]);
     }
 
-    room.hasRolled = true;
-
-    // Если выпал дубль: игрок не бросает повторно и не может покупать/взаимодействовать,
-    // очередь автоматически передаётся следующему (если игрок не ушёл в минус)
-    if (isDouble && p.money >= 0) {
-      addLog(room, [
-        playerSeg(p),
-        { text: ' dubl tashlagani uchun harakatsiz navbat avtomatik o‘tkazildi.' },
-      ]);
-      advanceTurn(room);
-    }
-
+    // При дубле (если игрок не попал в тюрьму) даём право бросить кости ещё раз
+    room.hasRolled = !isDouble || p.inJail;
     broadcastRoom(code);
   });
 

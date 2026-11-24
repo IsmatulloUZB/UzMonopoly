@@ -715,7 +715,7 @@ export default function App() {
 
   const canBuyCurrent =
     isMyTurn &&
-    roomData.hasRolled &&
+    (roomData.hasRolled || (roomData.doublesCount || 0) > 0) &&
     me.money >= 0 &&
     currentTile &&
     currentTile.type !== 'parking' &&
@@ -865,7 +865,7 @@ export default function App() {
                         </div>
                       </>
                     ) : (
-                      /* 3. ЛЕВЫЙ И ПРАВЫЙ СТОЛБЦЫ (вертикальная бегущая строка туда-сюда) */
+                      /* 3. ЛЕВЫЙ И ПРАВЫЙ СТОЛБЦЫ: город и владелец в параллельных вертикальных колонках */
                       <>
                         <div
                           style={{ backgroundColor: tile.group || '#263147' }}
@@ -887,9 +887,15 @@ export default function App() {
                           ))}
                         </div>
 
-                        <div className="flex-1 h-full flex items-center justify-center py-[1px] overflow-hidden">
+                        {/* Слева: [Город | Владелец]; Справа: [Владелец | Город] */}
+                        <div
+                          className={`flex-1 h-full flex items-center justify-center gap-[2px] py-[2px] px-[1px] overflow-hidden ${
+                            isLeftCol ? 'flex-row' : 'flex-row-reverse'
+                          }`}
+                        >
+                          {/* Колонка названия города (на всю высоту клетки) */}
                           <div
-                            className={`flex items-center justify-center gap-0.5 max-h-full overflow-hidden ${
+                            className={`h-full flex items-center justify-center overflow-hidden ${
                               isLeftCol ? 'vertical-text-left' : 'vertical-text-right'
                             }`}
                           >
@@ -897,17 +903,25 @@ export default function App() {
                             <MarqueeText
                               text={tile.name}
                               vertical
-                              className="text-[6.5px] sm:text-[10px] font-semibold text-slate-100 leading-none"
+                              className="h-full text-[6.5px] sm:text-[10px] font-semibold text-slate-100 leading-none"
                             />
-                            {owner && (
+                          </div>
+
+                          {/* Колонка имени владельца (на всю высоту клетки) */}
+                          {owner && (
+                            <div
+                              className={`h-full flex items-center justify-center overflow-hidden ${
+                                isLeftCol ? 'vertical-text-left' : 'vertical-text-right'
+                              }`}
+                            >
                               <MarqueeText
                                 text={owner.name}
                                 vertical
                                 style={{ backgroundColor: owner.color }}
-                                className="px-0.5 rounded-[2px] text-[5.5px] sm:text-[8px] font-bold text-white leading-none"
+                                className="h-full py-0.5 px-[1px] rounded-[2px] text-[5.5px] sm:text-[8px] font-bold text-white leading-none"
                               />
-                            )}
-                          </div>
+                            </div>
+                          )}
                         </div>
                       </>
                     )}
